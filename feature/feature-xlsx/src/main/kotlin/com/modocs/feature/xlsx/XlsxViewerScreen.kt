@@ -238,68 +238,72 @@ fun XlsxViewerScreen(
                         )
                     }
                 }
-            }
-        },
-        bottomBar = {
-            // Cell editing bar
-            if (state.isEditing && state.editingCell != null) {
-                val (editRow, editCol) = state.editingCell!!
-                val sheet = state.document?.sheets?.getOrNull(state.activeSheetIndex)
-                val currentValue = sheet?.rows
-                    ?.find { it.rowIndex == editRow }
-                    ?.cells?.find { it.columnIndex == editCol }
-                    ?.value ?: ""
-                var editText by remember(editRow, editCol) { mutableStateOf(currentValue) }
-                val editFocusRequester = remember { FocusRequester() }
 
-                LaunchedEffect(editRow, editCol) {
-                    editFocusRequester.requestFocus()
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                // Cell editing bar (at top so keyboard doesn't cover it)
+                AnimatedVisibility(
+                    visible = state.isEditing && state.editingCell != null,
+                    enter = expandVertically(),
+                    exit = shrinkVertically(),
                 ) {
-                    // Cell reference label
-                    Text(
-                        text = "${columnLetter(editCol)}${editRow + 1}",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(end = 8.dp),
-                    )
+                    if (state.editingCell != null) {
+                        val (editRow, editCol) = state.editingCell!!
+                        val sheet = state.document?.sheets?.getOrNull(state.activeSheetIndex)
+                        val currentValue = sheet?.rows
+                            ?.find { it.rowIndex == editRow }
+                            ?.cells?.find { it.columnIndex == editCol }
+                            ?.value ?: ""
+                        var editText by remember(editRow, editCol) { mutableStateOf(currentValue) }
+                        val editFocusRequester = remember { FocusRequester() }
 
-                    TextField(
-                        value = editText,
-                        onValueChange = { editText = it },
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(editFocusRequester),
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surface,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                        ),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
+                        LaunchedEffect(editRow, editCol) {
+                            editFocusRequester.requestFocus()
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surface)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "${columnLetter(editCol)}${editRow + 1}",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
+
+                            TextField(
+                                value = editText,
+                                onValueChange = { editText = it },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(editFocusRequester),
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium,
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                                ),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        viewModel.updateCellValue(editRow, editCol, editText)
+                                        viewModel.stopEditingCell()
+                                    },
+                                ),
+                            )
+
+                            IconButton(onClick = {
                                 viewModel.updateCellValue(editRow, editCol, editText)
                                 viewModel.stopEditingCell()
-                            },
-                        ),
-                    )
-
-                    IconButton(onClick = {
-                        viewModel.updateCellValue(editRow, editCol, editText)
-                        viewModel.stopEditingCell()
-                    }) {
-                        Icon(Icons.Filled.Check, contentDescription = "Confirm")
-                    }
-                    IconButton(onClick = { viewModel.stopEditingCell() }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Cancel")
+                            }) {
+                                Icon(Icons.Filled.Check, contentDescription = "Confirm")
+                            }
+                            IconButton(onClick = { viewModel.stopEditingCell() }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Cancel")
+                            }
+                        }
                     }
                 }
             }
