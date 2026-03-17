@@ -52,24 +52,6 @@
                 <data android:mimeType="application/vnd.ms-powerpoint" />
             </intent-filter>
 
-            <!-- Handle by file extension when MIME type is generic (e.g. application/octet-stream) -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="content" />
-                <data android:scheme="file" />
-                <data android:mimeType="*/*" />
-                <data android:pathPattern=".*\\.pdf" />
-                <data android:pathPattern=".*\\.docx" />
-                <data android:pathPattern=".*\\.doc" />
-                <data android:pathPattern=".*\\.xlsx" />
-                <data android:pathPattern=".*\\.xls" />
-                <data android:pathPattern=".*\\.pptx" />
-                <data android:pathPattern=".*\\.ppt" />
-            </intent-filter>
-
             <!-- Handle EDIT action for documents -->
             <intent-filter>
                 <action android:name="android.intent.action.EDIT" />
