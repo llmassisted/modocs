@@ -36,6 +36,45 @@ Grab the latest APK from [Releases](https://github.com/NotShivang/modocs/release
 - Fill & sign flattens annotations onto a re-rendered copy of the PDF (not a direct edit of the original file structure)
 - Very large PDFs may be slow to save
 
+## Roadmap
+
+PRs welcome for any of these.
+
+### DOCX
+- [ ] Table rendering (borders, merged cells, column widths)
+- [ ] Headers and footers
+- [ ] Text wrapping around images
+- [ ] Lists with proper indentation and numbering continuation
+- [ ] Basic text editing and saving
+
+### XLSX
+- [ ] Formula evaluation (SUM, AVERAGE, VLOOKUP, etc.)
+- [ ] Insert/delete rows and columns
+- [ ] Cell formatting (bold, color, borders) from the editor
+- [ ] Merged cell support
+- [ ] Charts and graphs rendering
+
+### PPTX
+- [ ] SmartArt rendering
+- [ ] Charts and graphs
+- [ ] Slide transitions and animation previews
+- [ ] Speaker notes viewer
+- [ ] Video/audio placeholder indicators
+
+### PDF
+- [ ] Direct PDF editing (modify original file structure instead of flattening)
+- [ ] Draggable/resizable annotations after placement
+- [ ] Highlight and strikethrough text tools
+- [ ] Form field auto-detection (AcroForm)
+- [ ] Optimize save performance for large documents
+
+### General
+- [ ] Recent files screen
+- [ ] Settings screen (default zoom, theme, etc.)
+- [ ] Dark mode support for document viewers
+- [ ] Printing support
+- [ ] Share/export documents
+
 ## Building from Source
 
 ```bash
