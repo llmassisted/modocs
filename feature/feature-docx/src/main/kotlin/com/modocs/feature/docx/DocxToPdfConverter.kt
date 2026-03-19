@@ -246,9 +246,29 @@ class DocxToPdfConverter(private val context: Context) {
     // --- Table ---
 
     /**
-     * Compute (x, width) positions for each cell in a row using actual cell widths.
+     * Compute (x, width) positions for each cell in a row using grid column widths.
      */
-    private fun computeCellPositions(cells: List<DocxTableCell>): List<Pair<Float, Float>> {
+    private fun computeCellPositions(cells: List<DocxTableCell>, gridColWidths: List<Int>): List<Pair<Float, Float>> {
+        if (gridColWidths.isNotEmpty()) {
+            val totalGridTwips = gridColWidths.sum()
+            if (totalGridTwips > 0) {
+                val result = mutableListOf<Pair<Float, Float>>()
+                var x = MARGIN_LEFT
+                var gridIdx = 0
+                for (cell in cells) {
+                    val span = cell.gridSpan.coerceAtLeast(1)
+                    var cellTwips = 0
+                    for (i in 0 until span) {
+                        if (gridIdx + i < gridColWidths.size) cellTwips += gridColWidths[gridIdx + i]
+                    }
+                    gridIdx += span
+                    val w = cellTwips.toFloat() / totalGridTwips * CONTENT_WIDTH
+                    result.add(x to w)
+                    x += w
+                }
+                return result
+            }
+        }
         val totalTwips = cells.sumOf { it.widthTwips ?: 0 }
         if (totalTwips > 0) {
             val result = mutableListOf<Pair<Float, Float>>()
@@ -272,15 +292,14 @@ class DocxToPdfConverter(private val context: Context) {
         if (state.canvas == null) return
         state.yPos += 8f
 
-        val borderPaint = Paint().apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 1f
-            color = android.graphics.Color.BLACK
-        }
+        val tableBorders = table.properties.borders
+        val totalRows = table.rows.size
 
-        for (row in table.rows) {
+        for ((rowIdx, row) in table.rows.withIndex()) {
             val allContinue = row.cells.all { it.vMerge == VMergeType.CONTINUE }
-            val positions = computeCellPositions(row.cells)
+            val positions = computeCellPositions(row.cells, table.gridColWidths)
+            val isFirstRow = rowIdx == 0
+            val isLastRow = rowIdx == totalRows - 1
 
             // Measure row height — skip vMerge CONTINUE cells
             var maxH = 0f
@@ -301,6 +320,8 @@ class DocxToPdfConverter(private val context: Context) {
 
             for ((ci, cell) in row.cells.withIndex()) {
                 val (cx, cellWidth) = positions[ci]
+                val isFirstCol = ci == 0
+                val isLastCol = ci == row.cells.lastIndex
 
                 // Cell background
                 val bgColor = cell.shading
@@ -312,18 +333,25 @@ class DocxToPdfConverter(private val context: Context) {
                     canvas.drawRect(cx, state.yPos, cx + cellWidth, state.yPos + maxH, fillPaint)
                 }
 
-                // For vMerge CONTINUE cells, only draw left/right borders
+                // Resolve borders: cell overrides > table defaults
+                val cb = cell.borders
+                val topB = cb?.top ?: if (isFirstRow) tableBorders.top else tableBorders.insideH
+                val bottomB = cb?.bottom ?: if (isLastRow) tableBorders.bottom else tableBorders.insideH
+                val leftB = cb?.left ?: if (isFirstCol) tableBorders.left else tableBorders.insideV
+                val rightB = cb?.right ?: if (isLastCol) tableBorders.right else tableBorders.insideV
+
+                // For vMerge CONTINUE cells, suppress top/bottom borders
                 if (cell.vMerge == VMergeType.CONTINUE) {
-                    canvas.drawLine(cx, state.yPos, cx, state.yPos + maxH, borderPaint) // left
-                    canvas.drawLine(cx + cellWidth, state.yPos, cx + cellWidth, state.yPos + maxH, borderPaint) // right
+                    drawBorder(canvas, leftB, cx, state.yPos, cx, state.yPos + maxH)
+                    drawBorder(canvas, rightB, cx + cellWidth, state.yPos, cx + cellWidth, state.yPos + maxH)
                     continue
                 }
 
-                // Normal cell borders
-                canvas.drawLine(cx, state.yPos, cx, state.yPos + maxH, borderPaint) // left
-                canvas.drawLine(cx + cellWidth, state.yPos, cx + cellWidth, state.yPos + maxH, borderPaint) // right
-                canvas.drawLine(cx, state.yPos + maxH, cx + cellWidth, state.yPos + maxH, borderPaint) // bottom
-                canvas.drawLine(cx, state.yPos, cx + cellWidth, state.yPos, borderPaint) // top
+                // Draw cell borders
+                drawBorder(canvas, topB, cx, state.yPos, cx + cellWidth, state.yPos)
+                drawBorder(canvas, bottomB, cx, state.yPos + maxH, cx + cellWidth, state.yPos + maxH)
+                drawBorder(canvas, leftB, cx, state.yPos, cx, state.yPos + maxH)
+                drawBorder(canvas, rightB, cx + cellWidth, state.yPos, cx + cellWidth, state.yPos + maxH)
 
                 var ty = state.yPos + 2f
                 for (para in cell.paragraphs) {
@@ -352,6 +380,16 @@ class DocxToPdfConverter(private val context: Context) {
         }
 
         state.yPos += 8f
+    }
+
+    private fun drawBorder(canvas: android.graphics.Canvas, border: CellBorder, x1: Float, y1: Float, x2: Float, y2: Float) {
+        if (border.style == BorderStyle.NONE) return
+        val paint = Paint().apply {
+            style = Paint.Style.STROKE
+            strokeWidth = (border.widthEighthPt / 8f).coerceAtLeast(0.5f)
+            color = border.color ?: android.graphics.Color.BLACK
+        }
+        canvas.drawLine(x1, y1, x2, y2, paint)
     }
 
     private fun measureCellHeight(cell: DocxTableCell, cellWidth: Float): Float {

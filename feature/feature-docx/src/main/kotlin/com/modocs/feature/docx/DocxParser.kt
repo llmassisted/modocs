@@ -755,6 +755,7 @@ object DocxParser {
     ): DocxTable {
         val rows = mutableListOf<DocxTableRow>()
         var tableProps = TableProperties()
+        val gridColWidths = mutableListOf<Int>()
         var depth = 1
 
         while (depth > 0 && parser.next() != XmlPullParser.END_DOCUMENT) {
@@ -766,6 +767,12 @@ object DocxParser {
                             tableProps = parseTableProperties(parser)
                             depth--
                         }
+                        "tblGrid" -> {
+                            // Parse grid column definitions — stay inside tblGrid
+                        }
+                        "gridCol" -> {
+                            parser.getAttr("w")?.toIntOrNull()?.let { gridColWidths.add(it) }
+                        }
                         "tr" -> {
                             rows.add(parseTableRow(parser, styles, relationships))
                             depth--
@@ -776,7 +783,7 @@ object DocxParser {
             }
         }
 
-        return DocxTable(rows, tableProps)
+        return DocxTable(rows, tableProps, gridColWidths)
     }
 
     private fun parseTableProperties(parser: XmlPullParser): TableProperties {
@@ -801,6 +808,10 @@ object DocxParser {
                             }
                             props = props.copy(alignment = align)
                         }
+                        "tblBorders" -> {
+                            props = props.copy(borders = parseTableBorders(parser))
+                            depth--
+                        }
                     }
                 }
                 XmlPullParser.END_TAG -> depth--
@@ -808,6 +819,46 @@ object DocxParser {
         }
 
         return props
+    }
+
+    private fun parseTableBorders(parser: XmlPullParser): TableBorders {
+        var borders = TableBorders()
+        var depth = 1
+
+        while (depth > 0 && parser.next() != XmlPullParser.END_DOCUMENT) {
+            when (parser.eventType) {
+                XmlPullParser.START_TAG -> {
+                    depth++
+                    val border = parseSingleBorder(parser)
+                    when (parser.name) {
+                        "top" -> borders = borders.copy(top = border)
+                        "bottom" -> borders = borders.copy(bottom = border)
+                        "left", "start" -> borders = borders.copy(left = border)
+                        "right", "end" -> borders = borders.copy(right = border)
+                        "insideH" -> borders = borders.copy(insideH = border)
+                        "insideV" -> borders = borders.copy(insideV = border)
+                    }
+                }
+                XmlPullParser.END_TAG -> depth--
+            }
+        }
+
+        return borders
+    }
+
+    private fun parseSingleBorder(parser: XmlPullParser): CellBorder {
+        val valStr = parser.getAttr("val") ?: "single"
+        val style = when (valStr) {
+            "none", "nil" -> BorderStyle.NONE
+            "double" -> BorderStyle.DOUBLE
+            "dashed", "dashDotStroked" -> BorderStyle.DASHED
+            "dotted" -> BorderStyle.DOTTED
+            "dashSmallGap" -> BorderStyle.DASH_SMALL_GAP
+            else -> BorderStyle.SINGLE
+        }
+        val sz = parser.getAttr("sz")?.toIntOrNull() ?: 4
+        val color = DocxColors.parseColor(parser.getAttr("color"))
+        return CellBorder(style, sz, color)
     }
 
     private fun parseTableRow(
@@ -844,6 +895,7 @@ object DocxParser {
         var gridSpan = 1
         var vMerge = VMergeType.NONE
         var shading: Int? = null
+        var cellBorders: CellBorders? = null
         var depth = 1
 
         while (depth > 0 && parser.next() != XmlPullParser.END_DOCUMENT) {
@@ -852,12 +904,12 @@ object DocxParser {
                     depth++
                     when (parser.name) {
                         "tcPr" -> {
-                            // Parse cell properties inline
-                            val (w, gs, vm, sh) = parseTableCellProperties(parser)
-                            widthTwips = w
-                            gridSpan = gs
-                            vMerge = vm
-                            shading = sh
+                            val props = parseTableCellProperties(parser)
+                            widthTwips = props.width
+                            gridSpan = props.gridSpan
+                            vMerge = props.vMerge
+                            shading = props.shading
+                            cellBorders = props.borders
                             depth--
                         }
                         "p" -> {
@@ -870,16 +922,20 @@ object DocxParser {
             }
         }
 
-        return DocxTableCell(paragraphs, widthTwips, gridSpan, vMerge, shading)
+        return DocxTableCell(paragraphs, widthTwips, gridSpan, vMerge, shading, cellBorders)
     }
 
-    private data class CellProps(val width: Int?, val gridSpan: Int, val vMerge: VMergeType, val shading: Int?)
+    private data class CellProps(
+        val width: Int?, val gridSpan: Int, val vMerge: VMergeType,
+        val shading: Int?, val borders: CellBorders?,
+    )
 
     private fun parseTableCellProperties(parser: XmlPullParser): CellProps {
         var width: Int? = null
         var gridSpan = 1
         var vMerge = VMergeType.NONE
         var shading: Int? = null
+        var borders: CellBorders? = null
         var depth = 1
 
         while (depth > 0 && parser.next() != XmlPullParser.END_DOCUMENT) {
@@ -896,13 +952,40 @@ object DocxParser {
                         "shd" -> {
                             shading = DocxColors.parseColor(parser.getAttr("fill"))
                         }
+                        "tcBorders" -> {
+                            borders = parseCellBorders(parser)
+                            depth--
+                        }
                     }
                 }
                 XmlPullParser.END_TAG -> depth--
             }
         }
 
-        return CellProps(width, gridSpan, vMerge, shading)
+        return CellProps(width, gridSpan, vMerge, shading, borders)
+    }
+
+    private fun parseCellBorders(parser: XmlPullParser): CellBorders {
+        var borders = CellBorders()
+        var depth = 1
+
+        while (depth > 0 && parser.next() != XmlPullParser.END_DOCUMENT) {
+            when (parser.eventType) {
+                XmlPullParser.START_TAG -> {
+                    depth++
+                    val border = parseSingleBorder(parser)
+                    when (parser.name) {
+                        "top" -> borders = borders.copy(top = border)
+                        "bottom" -> borders = borders.copy(bottom = border)
+                        "left", "start" -> borders = borders.copy(left = border)
+                        "right", "end" -> borders = borders.copy(right = border)
+                    }
+                }
+                XmlPullParser.END_TAG -> depth--
+            }
+        }
+
+        return borders
     }
 
     // --- Helpers ---

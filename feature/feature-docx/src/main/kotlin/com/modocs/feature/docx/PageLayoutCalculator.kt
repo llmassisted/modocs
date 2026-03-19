@@ -226,9 +226,29 @@ class PageLayoutCalculator(private val context: Context) {
     }
 
     /**
-     * Compute (x, width) positions for each cell in a row using actual cell widths.
+     * Compute (x, width) positions for each cell in a row using grid column widths.
      */
-    private fun computeCellPositions(cells: List<DocxTableCell>): List<Pair<Float, Float>> {
+    private fun computeCellPositions(cells: List<DocxTableCell>, gridColWidths: List<Int>): List<Pair<Float, Float>> {
+        if (gridColWidths.isNotEmpty()) {
+            val totalGridTwips = gridColWidths.sum()
+            if (totalGridTwips > 0) {
+                val result = mutableListOf<Pair<Float, Float>>()
+                var x = activeMarginLeft
+                var gridIdx = 0
+                for (cell in cells) {
+                    val span = cell.gridSpan.coerceAtLeast(1)
+                    var cellTwips = 0
+                    for (i in 0 until span) {
+                        if (gridIdx + i < gridColWidths.size) cellTwips += gridColWidths[gridIdx + i]
+                    }
+                    gridIdx += span
+                    val w = cellTwips.toFloat() / totalGridTwips * activeContentWidth
+                    result.add(x to w)
+                    x += w
+                }
+                return result
+            }
+        }
         val totalTwips = cells.sumOf { it.widthTwips ?: 0 }
         if (totalTwips > 0) {
             val result = mutableListOf<Pair<Float, Float>>()
@@ -253,7 +273,7 @@ class PageLayoutCalculator(private val context: Context) {
 
         for (row in table.rows) {
             val allContinue = row.cells.all { it.vMerge == VMergeType.CONTINUE }
-            val positions = computeCellPositions(row.cells)
+            val positions = computeCellPositions(row.cells, table.gridColWidths)
 
             var maxH = 0f
             for ((ci, cell) in row.cells.withIndex()) {

@@ -604,10 +604,42 @@ private fun DocxContent(
     val marginRightDp = (pageSetup.marginRightPt * pageScale).dp
     val marginTopDp = (pageSetup.marginTopPt * pageScale).dp
 
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    val newScale = (scale * zoom).coerceIn(1f, 4f)
+                    scale = newScale
+
+                    if (newScale > 1f) {
+                        offsetX += pan.x
+                        offsetY += pan.y
+                        val maxX = (size.width * (newScale - 1f)) / 2f
+                        val maxY = (size.height * (newScale - 1f)) / 2f
+                        offsetX = offsetX.coerceIn(-maxX, maxX)
+                        offsetY = offsetY.coerceIn(-maxY, maxY)
+                    } else {
+                        offsetX = 0f
+                        offsetY = 0f
+                    }
+                }
+            },
+    ) {
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationX = offsetX
+                translationY = offsetY
+            }
             .background(Color.White),
         contentPadding = PaddingValues(
             start = marginLeftDp,
@@ -649,6 +681,7 @@ private fun DocxContent(
                 onTextChanged = { newText -> viewModel.updateParagraphText(index, newText) },
             )
         }
+    }
     }
 }
 

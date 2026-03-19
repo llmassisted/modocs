@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -31,6 +32,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -410,7 +413,9 @@ private fun TableRenderer(
     pageScale: Float,
     modifier: Modifier = Modifier,
 ) {
-    val borderColor = Color.Black
+    val gridColWidths = table.gridColWidths
+    val totalGridTwips = gridColWidths.sum().takeIf { it > 0 }
+    val tableBorders = table.properties.borders
 
     Column(
         modifier = modifier
@@ -418,17 +423,44 @@ private fun TableRenderer(
             .padding(vertical = (8f * pageScale).dp)
             .horizontalScroll(rememberScrollState()),
     ) {
-        for (row in table.rows) {
+        for ((rowIdx, row) in table.rows.withIndex()) {
+            val isFirstRow = rowIdx == 0
+            val isLastRow = rowIdx == table.rows.lastIndex
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(IntrinsicSize.Min),
             ) {
-                for (cell in row.cells) {
-                    if (cell.vMerge == VMergeType.CONTINUE) continue
+                var gridIdx = 0
+                for ((cellIdx, cell) in row.cells.withIndex()) {
+                    val isFirstCol = cellIdx == 0
+                    val isLastCol = cellIdx == row.cells.lastIndex
 
-                    // Scale cell widths proportionally (twips → pt → scaled dp)
-                    val cellWidth = cell.widthTwips?.let { (it / 20f * pageScale).dp }
+                    if (cell.vMerge == VMergeType.CONTINUE) {
+                        gridIdx += cell.gridSpan.coerceAtLeast(1)
+                        continue
+                    }
+
+                    // Compute cell width from grid columns + gridSpan
+                    val span = cell.gridSpan.coerceAtLeast(1)
+                    val cellWidth = if (totalGridTwips != null && gridIdx < gridColWidths.size) {
+                        var twips = 0
+                        for (i in 0 until span) {
+                            if (gridIdx + i < gridColWidths.size) twips += gridColWidths[gridIdx + i]
+                        }
+                        (twips / 20f * pageScale).dp
+                    } else {
+                        cell.widthTwips?.let { (it / 20f * pageScale).dp }
+                    }
+                    gridIdx += span
+
+                    // Resolve borders: cell overrides > table defaults
+                    val cellBorders = cell.borders
+                    val topBorder = cellBorders?.top ?: if (isFirstRow) tableBorders.top else tableBorders.insideH
+                    val bottomBorder = cellBorders?.bottom ?: if (isLastRow) tableBorders.bottom else tableBorders.insideH
+                    val leftBorder = cellBorders?.left ?: if (isFirstCol) tableBorders.left else tableBorders.insideV
+                    val rightBorder = cellBorders?.right ?: if (isLastCol) tableBorders.right else tableBorders.insideV
 
                     Box(
                         modifier = Modifier
@@ -436,7 +468,8 @@ private fun TableRenderer(
                                 if (cellWidth != null) Modifier.width(cellWidth)
                                 else Modifier.weight(1f)
                             )
-                            .border(0.5.dp, borderColor)
+                            .fillMaxHeight()
+                            .drawCellBorders(topBorder, bottomBorder, leftBorder, rightBorder, pageScale)
                             .then(
                                 if (cell.shading != null) Modifier.background(Color(cell.shading!!))
                                 else Modifier
@@ -464,6 +497,34 @@ private fun TableRenderer(
                 }
             }
         }
+    }
+}
+
+/** Draw individual cell borders based on resolved border settings. */
+private fun Modifier.drawCellBorders(
+    top: CellBorder, bottom: CellBorder, left: CellBorder, right: CellBorder,
+    pageScale: Float,
+): Modifier = this.drawBehind {
+    fun borderWidth(border: CellBorder): Float =
+        (border.widthEighthPt / 8f * pageScale).dp.toPx().coerceAtLeast(0.5f)
+    fun borderColor(border: CellBorder): Color =
+        if (border.color != null) Color(border.color) else Color.Black
+
+    if (top.style != BorderStyle.NONE) {
+        val w = borderWidth(top)
+        drawLine(borderColor(top), Offset(0f, w / 2), Offset(size.width, w / 2), strokeWidth = w)
+    }
+    if (bottom.style != BorderStyle.NONE) {
+        val w = borderWidth(bottom)
+        drawLine(borderColor(bottom), Offset(0f, size.height - w / 2), Offset(size.width, size.height - w / 2), strokeWidth = w)
+    }
+    if (left.style != BorderStyle.NONE) {
+        val w = borderWidth(left)
+        drawLine(borderColor(left), Offset(w / 2, 0f), Offset(w / 2, size.height), strokeWidth = w)
+    }
+    if (right.style != BorderStyle.NONE) {
+        val w = borderWidth(right)
+        drawLine(borderColor(right), Offset(size.width - w / 2, 0f), Offset(size.width - w / 2, size.height), strokeWidth = w)
     }
 }
 

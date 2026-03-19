@@ -208,15 +208,17 @@ object DocxWriter {
         if (table.properties.widthTwips != null) {
             sb.append("""<w:tblW w:w="${table.properties.widthTwips}" w:type="dxa"/>""")
         }
-        sb.append("""<w:tblBorders>""")
-        sb.append("""<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>""")
-        sb.append("""<w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>""")
-        sb.append("""<w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>""")
-        sb.append("""<w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>""")
-        sb.append("""<w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/>""")
-        sb.append("""<w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/>""")
-        sb.append("""</w:tblBorders>""")
+        writeBorderElement(sb, "tblBorders", table.properties.borders)
         sb.append("</w:tblPr>")
+
+        // Grid columns
+        if (table.gridColWidths.isNotEmpty()) {
+            sb.append("<w:tblGrid>")
+            for (w in table.gridColWidths) {
+                sb.append("""<w:gridCol w:w="$w"/>""")
+            }
+            sb.append("</w:tblGrid>")
+        }
 
         for (row in table.rows) {
             sb.append("<w:tr>")
@@ -238,6 +240,9 @@ object DocxWriter {
                     val hex = String.format("%06X", cell.shading!! and 0xFFFFFF)
                     sb.append("""<w:shd w:val="clear" w:color="auto" w:fill="$hex"/>""")
                 }
+                if (cell.borders != null) {
+                    writeCellBorders(sb, cell.borders!!)
+                }
                 sb.append("</w:tcPr>")
 
                 for (para in cell.paragraphs) {
@@ -252,6 +257,41 @@ object DocxWriter {
         }
 
         sb.append("</w:tbl>\n")
+    }
+
+    private fun writeBorderElement(sb: StringBuilder, tag: String, borders: TableBorders) {
+        sb.append("<w:$tag>")
+        writeSingleBorder(sb, "top", borders.top)
+        writeSingleBorder(sb, "left", borders.left)
+        writeSingleBorder(sb, "bottom", borders.bottom)
+        writeSingleBorder(sb, "right", borders.right)
+        writeSingleBorder(sb, "insideH", borders.insideH)
+        writeSingleBorder(sb, "insideV", borders.insideV)
+        sb.append("</w:$tag>")
+    }
+
+    private fun writeCellBorders(sb: StringBuilder, borders: CellBorders) {
+        sb.append("<w:tcBorders>")
+        borders.top?.let { writeSingleBorder(sb, "top", it) }
+        borders.left?.let { writeSingleBorder(sb, "left", it) }
+        borders.bottom?.let { writeSingleBorder(sb, "bottom", it) }
+        borders.right?.let { writeSingleBorder(sb, "right", it) }
+        sb.append("</w:tcBorders>")
+    }
+
+    private fun writeSingleBorder(sb: StringBuilder, name: String, border: CellBorder) {
+        val valStr = when (border.style) {
+            BorderStyle.NONE -> "none"
+            BorderStyle.SINGLE -> "single"
+            BorderStyle.DOUBLE -> "double"
+            BorderStyle.DASHED -> "dashed"
+            BorderStyle.DOTTED -> "dotted"
+            BorderStyle.DASH_SMALL_GAP -> "dashSmallGap"
+        }
+        val colorStr = if (border.color != null) {
+            String.format("%06X", border.color and 0xFFFFFF)
+        } else "auto"
+        sb.append("""<w:$name w:val="$valStr" w:sz="${border.widthEighthPt}" w:space="0" w:color="$colorStr"/>""")
     }
 
     private fun writeImage(sb: StringBuilder, image: DocxImage) {

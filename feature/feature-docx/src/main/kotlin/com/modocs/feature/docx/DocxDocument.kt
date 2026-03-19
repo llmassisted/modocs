@@ -61,6 +61,8 @@ data class DocxParagraph(
 data class DocxTable(
     val rows: List<DocxTableRow>,
     val properties: TableProperties = TableProperties(),
+    /** Column widths from tblGrid in twips — authoritative source for consistent column layout. */
+    val gridColWidths: List<Int> = emptyList(),
 ) : DocxElement
 
 data class DocxTableRow(
@@ -73,6 +75,21 @@ data class DocxTableCell(
     val gridSpan: Int = 1,
     val vMerge: VMergeType = VMergeType.NONE,
     val shading: Int? = null,
+    val borders: CellBorders? = null,
+)
+
+/** Per-side border definition for a table cell. null = inherit from table default. */
+data class CellBorders(
+    val top: CellBorder? = null,
+    val bottom: CellBorder? = null,
+    val left: CellBorder? = null,
+    val right: CellBorder? = null,
+)
+
+data class CellBorder(
+    val style: BorderStyle = BorderStyle.SINGLE,
+    val widthEighthPt: Int = 4, // border width in 1/8 pt (OOXML sz attribute)
+    val color: Int? = null, // null = auto/black
 )
 
 enum class VMergeType { NONE, RESTART, CONTINUE }
@@ -157,10 +174,20 @@ enum class ParagraphAlignment {
 data class TableProperties(
     val widthTwips: Int? = null,
     val alignment: ParagraphAlignment = ParagraphAlignment.LEFT,
-    val borderStyle: BorderStyle = BorderStyle.SINGLE,
+    val borders: TableBorders = TableBorders(),
 )
 
-enum class BorderStyle { NONE, SINGLE, DOUBLE, DASHED }
+/** Table-level default borders (from tblBorders). Applied to all cells unless overridden by tcBorders. */
+data class TableBorders(
+    val top: CellBorder = CellBorder(),
+    val bottom: CellBorder = CellBorder(),
+    val left: CellBorder = CellBorder(),
+    val right: CellBorder = CellBorder(),
+    val insideH: CellBorder = CellBorder(),
+    val insideV: CellBorder = CellBorder(),
+)
+
+enum class BorderStyle { NONE, SINGLE, DOUBLE, DASHED, DOTTED, DASH_SMALL_GAP }
 
 // --- Styles ---
 
