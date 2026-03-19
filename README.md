@@ -6,8 +6,8 @@ If you're like me, you sometimes use your phone to look at docs, fill out forms,
 
 ## Features
 
-- **PDF** — View, search, fill forms (tap to place text, signatures, checkmarks, dates), and save filled copies
-- **DOCX** — View Word documents with formatting, images, and basic layout
+- **PDF** — View, search, fill forms (tap to place text, signatures, checkmarks, dates), drag to reposition, adjust font sizes, and save filled copies
+- **DOCX** — View Word documents with formatting, images, tables (borders, merged cells, column widths), and basic layout
 - **XLSX** — View and edit spreadsheet cells, save changes
 - **PPTX** — View presentations with text, shapes, images, and backgrounds
 
@@ -41,7 +41,7 @@ Grab the latest APK from [Releases](https://github.com/NotShivang/modocs/release
 PRs welcome for any of these.
 
 ### DOCX
-- [ ] Table rendering (borders, merged cells, column widths)
+- [x] Table rendering (borders, merged cells, column widths)
 - [ ] Headers and footers
 - [ ] Text wrapping around images
 - [ ] Lists with proper indentation and numbering continuation
@@ -63,7 +63,7 @@ PRs welcome for any of these.
 
 ### PDF
 - [ ] Direct PDF editing (modify original file structure instead of flattening)
-- [ ] Draggable/resizable annotations after placement
+- [x] Draggable/resizable annotations after placement
 - [ ] Highlight and strikethrough text tools
 - [ ] Form field auto-detection (AcroForm)
 - [ ] Optimize save performance for large documents
