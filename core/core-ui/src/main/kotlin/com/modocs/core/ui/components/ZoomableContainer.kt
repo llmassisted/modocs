@@ -95,8 +95,8 @@ fun ZoomableContainer(
                                 do {
                                     val event = awaitPointerEvent()
 
-                                    // Only handle zoom/pan on multi-touch (pinch)
                                     if (event.changes.size >= 2) {
+                                        // Multi-touch: handle zoom + pan in both axes
                                         val zoomChange = event.calculateZoom()
                                         val panChange = event.calculatePan()
 
@@ -117,8 +117,19 @@ fun ZoomableContainer(
                                         }
 
                                         event.changes.forEach { it.consume() }
+                                    } else if (scale > minScale && event.changes.size == 1) {
+                                        // Single-finger when zoomed: handle horizontal pan here
+                                        // (LazyColumn only scrolls vertically, so horizontal
+                                        // drag never reaches the NestedScrollConnection)
+                                        val change = event.changes[0]
+                                        val dragX = change.position.x - change.previousPosition.x
+                                        if (dragX != 0f) {
+                                            offsetX = (offsetX + dragX)
+                                                .coerceIn(-maxOffsetX(), maxOffsetX())
+                                        }
+                                        // Don't consume — vertical component still flows
+                                        // to LazyColumn via nestedScroll
                                     }
-                                    // Single-touch: don't consume — let nestedScroll + child handle it
                                 } while (event.changes.any { it.pressed })
                             }
                         }
