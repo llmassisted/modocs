@@ -14,6 +14,7 @@ import com.modocs.core.ui.components.ZoomableContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,7 +33,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
@@ -272,21 +273,6 @@ fun DocxViewerScreen(
                     onQueryChange = { viewModel.updateSearchQuery(it) },
                     onNext = { viewModel.nextMatch() },
                     onPrevious = { viewModel.previousMatch() },
-                )
-            }
-
-            // Text editing bar — outside ZoomableContainer so cursor works at any zoom
-            AnimatedVisibility(
-                visible = state.isEditing && state.editingElementIndex >= 0,
-                enter = expandVertically(),
-                exit = shrinkVertically(),
-            ) {
-                val editingPara = state.document?.body?.getOrNull(state.editingElementIndex)
-                        as? DocxParagraph
-                DocxTextEditBar(
-                    text = editingPara?.text ?: "",
-                    onTextChange = { viewModel.updateParagraphText(state.editingElementIndex, it) },
-                    onDone = { viewModel.stopEditingElement() },
                 )
             }
 
@@ -584,60 +570,67 @@ private fun DocxContent(
     val screenWidthDp = configuration.screenWidthDp.toFloat()
     val pageScale = screenWidthDp / pageSetup.pageWidthPt
 
-    // Scale page margins proportionally
-    val marginLeftDp = (pageSetup.marginLeftPt * pageScale).dp
-    val marginRightDp = (pageSetup.marginRightPt * pageScale).dp
-    val marginTopDp = (pageSetup.marginTopPt * pageScale).dp
+    // Layout-level zoom: scale all dimensions (including content width) by the
+    // zoom factor so text wraps at the exact same points at every zoom level,
+    // preserving the fixed PDF-like layout. No graphicsLayer means
+    // BasicTextField cursor/handle positioning is always correct.
+    val horizontalScrollState = rememberScrollState()
 
     ZoomableContainer(
         modifier = Modifier.fillMaxSize(),
+        applyTransform = false,
         maxScale = 4f,
         contentModifier = Modifier.fillMaxSize(),
-    ) { _ ->
-        LazyColumn(
-            state = listState,
+    ) { zoomScale ->
+        val effectivePageScale = pageScale * zoomScale
+        val contentWidth = (screenWidthDp * zoomScale).dp
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.White),
-            contentPadding = PaddingValues(
-                start = marginLeftDp,
-                end = marginRightDp,
-                top = marginTopDp,
-                bottom = 12.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
+                .horizontalScroll(horizontalScrollState),
         ) {
-            itemsIndexed(
-                items = document.body,
-                key = { index, _ -> index },
-            ) { index, element ->
-                // Show auto page break indicator before this element
-                if (index in autoPageBreaks) {
-                    AutoPageBreakIndicator(pageNumber = computePageNumber(index, autoPageBreaks))
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .width(contentWidth)
+                    .background(Color.White),
+                contentPadding = PaddingValues(
+                    start = (pageSetup.marginLeftPt * effectivePageScale).dp,
+                    end = (pageSetup.marginRightPt * effectivePageScale).dp,
+                    top = (pageSetup.marginTopPt * effectivePageScale).dp,
+                    bottom = (12 * zoomScale).dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                itemsIndexed(
+                    items = document.body,
+                    key = { index, _ -> index },
+                ) { index, element ->
+                    if (index in autoPageBreaks) {
+                        AutoPageBreakIndicator(pageNumber = computePageNumber(index, autoPageBreaks))
+                    }
+
+                    val highlights = viewModel.getHighlightsForElement(index)
+                    val highlightRanges = highlights.map { it.first }
+                    val currentGlobalIndex = searchState.currentMatchIndex
+                    val currentLocalIndex = highlights.indexOfFirst { it.second == currentGlobalIndex }
+
+                    val isThisEditing = isEditing && editingElementIndex == index
+
+                    DocxElementRenderer(
+                        element = element,
+                        document = document,
+                        fontResolver = fontResolver,
+                        pageScale = effectivePageScale,
+                        searchHighlights = highlightRanges,
+                        currentHighlightIndex = currentLocalIndex,
+                        isEditing = isEditing,
+                        isActivelyEditing = isThisEditing,
+                        onTapToEdit = { viewModel.startEditingElement(index) },
+                        onTextChanged = { newText -> viewModel.updateParagraphText(index, newText) },
+                    )
                 }
-
-                // Get search highlights for this element
-                val highlights = viewModel.getHighlightsForElement(index)
-                val highlightRanges = highlights.map { it.first }
-                val currentGlobalIndex = searchState.currentMatchIndex
-
-                // Find which local highlight index corresponds to the current global match
-                val currentLocalIndex = highlights.indexOfFirst { it.second == currentGlobalIndex }
-
-                val isThisEditing = isEditing && editingElementIndex == index
-
-                DocxElementRenderer(
-                    element = element,
-                    document = document,
-                    fontResolver = fontResolver,
-                    pageScale = pageScale,
-                    searchHighlights = highlightRanges,
-                    currentHighlightIndex = currentLocalIndex,
-                    isEditing = isEditing,
-                    isActivelyEditing = isThisEditing,
-                    onTapToEdit = { viewModel.startEditingElement(index) },
-                    onTextChanged = { newText -> viewModel.updateParagraphText(index, newText) },
-                )
             }
         }
     }
@@ -689,58 +682,6 @@ private fun AutoPageBreakIndicator(pageNumber: Int) {
                     0f,
                 ),
             )
-        }
-    }
-}
-
-@Composable
-private fun DocxTextEditBar(
-    text: String,
-    onTextChange: (String) -> Unit,
-    onDone: () -> Unit,
-) {
-    val focusRequester = remember { FocusRequester() }
-    val keyboardController = LocalSoftwareKeyboardController.current
-
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        tonalElevation = 4.dp,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedTextField(
-                value = text,
-                onValueChange = onTextChange,
-                modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(focusRequester),
-                placeholder = { Text("Edit text...") },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(
-                    onDone = {
-                        keyboardController?.hide()
-                        onDone()
-                    },
-                ),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                ),
-            )
-            IconButton(onClick = {
-                keyboardController?.hide()
-                onDone()
-            }) {
-                Icon(Icons.Default.Check, contentDescription = "Done")
-            }
         }
     }
 }

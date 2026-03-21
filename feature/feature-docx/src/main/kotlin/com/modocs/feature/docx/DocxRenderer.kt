@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,12 +30,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -173,33 +178,58 @@ private fun ParagraphRenderer(
     val lineH = (props.effectiveLineHeight(baseFontSizePt * headingScale) * pageScale).sp
 
     if (isActivelyEditing) {
-        // Highlight the paragraph being edited. Actual text input is in
-        // a separate overlay outside the ZoomableContainer so that cursor
-        // and selection handles work correctly at any zoom level.
-        val annotatedText = remember(paragraph.runs, pageScale) {
-            buildParagraphText(
-                runs = paragraph.runs,
-                fontResolver = fontResolver,
-                styles = document.styles,
-                listPrefix = listPrefix,
-                searchHighlights = emptyList(),
-                currentHighlightIndex = -1,
-                textOffset = 0,
-                pageScale = pageScale,
-                headingScale = headingScale,
-            )
+        // Inline editing with per-run styling
+        val focusRequester = remember { FocusRequester() }
+
+        val initialFieldValue = remember(paragraph.runs, pageScale) {
+            val annotated = buildAnnotatedString {
+                for (run in paragraph.runs) {
+                    if (run.isPageBreak) continue
+                    if (run.isBreak) { append("\n"); continue }
+                    val rp = run.properties
+                    val scaledSize = ((rp.fontSizeSp ?: 11f) * headingScale * pageScale).sp
+                    withStyle(SpanStyle(
+                        fontWeight = if (rp.bold || isHeading) FontWeight.Bold else null,
+                        fontStyle = if (rp.italic) FontStyle.Italic else null,
+                        textDecoration = buildTextDecoration(rp),
+                        fontSize = scaledSize,
+                        color = rp.color?.let { Color(it) } ?: Color.Black,
+                        fontFamily = fontResolver.resolve(rp.fontName),
+                    )) {
+                        append(run.text)
+                    }
+                }
+            }
+            TextFieldValue(annotated)
         }
 
-        Text(
-            text = annotatedText,
+        var fieldValue by remember(paragraph.runs, pageScale) { mutableStateOf(initialFieldValue) }
+
+        val editStyle = baseTextStyle.merge(
+            TextStyle(lineHeight = lineH, textAlign = textAlign)
+        )
+
+        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+        Box(
             modifier = contentModifier
                 .border(1.dp, Color(0xFF1976D2), MaterialTheme.shapes.small)
                 .background(Color(0x0A1976D2), MaterialTheme.shapes.small)
                 .padding(4.dp),
-            textAlign = textAlign,
-            style = baseTextStyle,
-            lineHeight = lineH,
-        )
+        ) {
+            BasicTextField(
+                value = fieldValue,
+                onValueChange = { newValue ->
+                    fieldValue = newValue
+                    onTextChanged(newValue.text)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+                textStyle = editStyle,
+                cursorBrush = SolidColor(Color(0xFF1976D2)),
+            )
+        }
     } else {
         // Read-only mode
         val annotatedText = remember(paragraph.runs, searchHighlights, currentHighlightIndex, pageScale) {
