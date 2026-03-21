@@ -648,7 +648,7 @@ private fun PdfPagesContent(
 
     ZoomableContainer(
         modifier = modifier.fillMaxSize(),
-        enabled = !fillSignState.isActive,
+        enabled = true,
         maxScale = 4f,
         contentModifier = Modifier.fillMaxSize(),
     ) {
