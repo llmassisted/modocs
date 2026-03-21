@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -54,6 +55,7 @@ fun ZoomableContainer(
     enabled: Boolean = true,
     scrollLocked: Boolean = false,
     applyTransform: Boolean = true,
+    resetKey: Any? = null,
     minScale: Float = 1f,
     maxScale: Float = 4f,
     contentModifier: Modifier = Modifier,
@@ -62,6 +64,13 @@ fun ZoomableContainer(
     var scale by remember { mutableFloatStateOf(minScale) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
+
+    // Reset zoom when resetKey changes (e.g. entering/exiting edit mode)
+    LaunchedEffect(resetKey) {
+        scale = minScale
+        offsetX = 0f
+        offsetY = 0f
+    }
     var containerWidth by remember { mutableIntStateOf(0) }
     var containerHeight by remember { mutableIntStateOf(0) }
 

@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
@@ -271,6 +272,21 @@ fun DocxViewerScreen(
                     onQueryChange = { viewModel.updateSearchQuery(it) },
                     onNext = { viewModel.nextMatch() },
                     onPrevious = { viewModel.previousMatch() },
+                )
+            }
+
+            // Text editing bar — outside ZoomableContainer so cursor works at any zoom
+            AnimatedVisibility(
+                visible = state.isEditing && state.editingElementIndex >= 0,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                val editingPara = state.document?.body?.getOrNull(state.editingElementIndex)
+                        as? DocxParagraph
+                DocxTextEditBar(
+                    text = editingPara?.text ?: "",
+                    onTextChange = { viewModel.updateParagraphText(state.editingElementIndex, it) },
+                    onDone = { viewModel.stopEditingElement() },
                 )
             }
 
@@ -568,31 +584,26 @@ private fun DocxContent(
     val screenWidthDp = configuration.screenWidthDp.toFloat()
     val pageScale = screenWidthDp / pageSetup.pageWidthPt
 
+    // Scale page margins proportionally
+    val marginLeftDp = (pageSetup.marginLeftPt * pageScale).dp
+    val marginRightDp = (pageSetup.marginRightPt * pageScale).dp
+    val marginTopDp = (pageSetup.marginTopPt * pageScale).dp
+
     ZoomableContainer(
         modifier = Modifier.fillMaxSize(),
-        applyTransform = false,
         maxScale = 4f,
         contentModifier = Modifier.fillMaxSize(),
-    ) { zoomScale ->
-        // Layout-level zoom: multiply pageScale by zoom so fonts, spacing,
-        // and margins all scale proportionally. This keeps the input coordinate
-        // system aligned with the visual rendering (critical for cursor/handle
-        // positioning in BasicTextField).
-        val effectivePageScale = pageScale * zoomScale
-        val zoomedMarginLeft = (pageSetup.marginLeftPt * effectivePageScale).dp
-        val zoomedMarginRight = (pageSetup.marginRightPt * effectivePageScale).dp
-        val zoomedMarginTop = (pageSetup.marginTopPt * effectivePageScale).dp
-
+    ) { _ ->
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.White),
             contentPadding = PaddingValues(
-                start = zoomedMarginLeft,
-                end = zoomedMarginRight,
-                top = zoomedMarginTop,
-                bottom = (12 * zoomScale).dp,
+                start = marginLeftDp,
+                end = marginRightDp,
+                top = marginTopDp,
+                bottom = 12.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
@@ -619,7 +630,7 @@ private fun DocxContent(
                     element = element,
                     document = document,
                     fontResolver = fontResolver,
-                    pageScale = effectivePageScale,
+                    pageScale = pageScale,
                     searchHighlights = highlightRanges,
                     currentHighlightIndex = currentLocalIndex,
                     isEditing = isEditing,
@@ -678,6 +689,58 @@ private fun AutoPageBreakIndicator(pageNumber: Int) {
                     0f,
                 ),
             )
+        }
+    }
+}
+
+@Composable
+private fun DocxTextEditBar(
+    text: String,
+    onTextChange: (String) -> Unit,
+    onDone: () -> Unit,
+) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        tonalElevation = 4.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = onTextChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester),
+                placeholder = { Text("Edit text...") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = {
+                        keyboardController?.hide()
+                        onDone()
+                    },
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                ),
+            )
+            IconButton(onClick = {
+                keyboardController?.hide()
+                onDone()
+            }) {
+                Icon(Icons.Default.Check, contentDescription = "Done")
+            }
         }
     }
 }
