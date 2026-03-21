@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -177,21 +178,36 @@ private fun ParagraphRenderer(
     val lineH = (props.effectiveLineHeight(baseFontSizePt * headingScale) * pageScale).sp
 
     if (isActivelyEditing) {
-        // Editable mode: BasicTextField
-        val plainText = paragraph.text
-        var editText by remember(plainText) { mutableStateOf(plainText) }
+        // Editable mode: BasicTextField with per-run styling so cursor
+        // and selection handles align with the actual text layout.
         val focusRequester = remember { FocusRequester() }
 
-        val rp = paragraph.runs.firstOrNull()?.properties ?: RunProperties()
-        val runFontSize = (rp.fontSizeSp ?: 11f) * headingScale * pageScale
+        val initialFieldValue = remember(paragraph.runs) {
+            val annotated = buildAnnotatedString {
+                for (run in paragraph.runs) {
+                    if (run.isPageBreak) continue
+                    if (run.isBreak) { append("\n"); continue }
+                    val rp = run.properties
+                    val scaledSize = ((rp.fontSizeSp ?: 11f) * headingScale * pageScale).sp
+                    withStyle(SpanStyle(
+                        fontWeight = if (rp.bold || isHeading) FontWeight.Bold else null,
+                        fontStyle = if (rp.italic) FontStyle.Italic else null,
+                        textDecoration = buildTextDecoration(rp),
+                        fontSize = scaledSize,
+                        color = rp.color?.let { Color(it) } ?: Color.Black,
+                        fontFamily = fontResolver.resolve(rp.fontName),
+                    )) {
+                        append(run.text)
+                    }
+                }
+            }
+            TextFieldValue(annotated)
+        }
+
+        var fieldValue by remember(paragraph.runs) { mutableStateOf(initialFieldValue) }
+
         val editStyle = baseTextStyle.merge(
             TextStyle(
-                fontWeight = if (rp.bold || isHeading) FontWeight.Bold else null,
-                fontStyle = if (rp.italic) FontStyle.Italic else null,
-                textDecoration = buildTextDecoration(rp),
-                fontSize = runFontSize.sp,
-                color = rp.color?.let { Color(it) } ?: Color.Black,
-                fontFamily = fontResolver.resolve(rp.fontName),
                 lineHeight = lineH,
                 textAlign = textAlign,
             )
@@ -211,10 +227,10 @@ private fun ParagraphRenderer(
                 .padding(4.dp),
         ) {
             BasicTextField(
-                value = editText,
-                onValueChange = { newText ->
-                    editText = newText
-                    onTextChanged(newText)
+                value = fieldValue,
+                onValueChange = { newValue ->
+                    fieldValue = newValue
+                    onTextChanged(newValue.text)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
