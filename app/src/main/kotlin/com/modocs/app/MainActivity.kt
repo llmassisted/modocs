@@ -19,6 +19,7 @@ class MainActivity : ComponentActivity() {
 
     private var documentUri by mutableStateOf<Uri?>(null)
     private var documentType by mutableStateOf<DocumentType?>(null)
+    private var isOpenedExternally by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,6 +32,7 @@ class MainActivity : ComponentActivity() {
                 MoDocsApp(
                     initialDocumentUri = documentUri,
                     initialDocumentType = documentType,
+                    isOpenedExternally = isOpenedExternally,
                 )
             }
         }
@@ -48,6 +50,7 @@ class MainActivity : ComponentActivity() {
         }
         if (uri != null) {
             documentUri = uri
+            isOpenedExternally = true
             // Detect document type from MIME type or file name
             val mimeType = intent.type ?: contentResolver.getType(uri)
             val fileName = uri.lastPathSegment ?: ""

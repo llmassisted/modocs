@@ -1,6 +1,8 @@
 package com.modocs.app.navigation
 
+import android.app.Activity
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -24,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -110,15 +113,20 @@ enum class TopLevelDestination(
 fun MoDocsApp(
     initialDocumentUri: Uri? = null,
     initialDocumentType: DocumentType? = null,
+    isOpenedExternally: Boolean = false,
 ) {
     val navController = rememberNavController()
     var selectedDestination by rememberSaveable { mutableStateOf(TopLevelDestination.FILES) }
+    val activity = LocalContext.current as? Activity
 
     // Handle intent-based document opening
     LaunchedEffect(initialDocumentUri) {
         if (initialDocumentUri != null) {
             val docType = initialDocumentType ?: DocumentType.PDF
             navController.navigate(Routes.viewerForType(initialDocumentUri, docType)) {
+                if (isOpenedExternally) {
+                    popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                }
                 launchSingleTop = true
             }
         }
@@ -202,11 +210,18 @@ fun MoDocsApp(
             val uriString = backStackEntry.arguments?.getString("uri") ?: ""
             val name = backStackEntry.arguments?.getString("name") ?: ""
             val uri = Uri.parse(uriString)
+            val navigateBack = {
+                if (!navController.popBackStack()) {
+                    activity?.moveTaskToBack(true)
+                }
+                Unit
+            }
 
+            BackHandler(onBack = navigateBack)
             PdfViewerScreen(
                 uri = uri,
                 displayName = name.ifEmpty { null },
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = navigateBack,
             )
         }
 
@@ -224,11 +239,18 @@ fun MoDocsApp(
             val uriString = backStackEntry.arguments?.getString("uri") ?: ""
             val name = backStackEntry.arguments?.getString("name") ?: ""
             val uri = Uri.parse(uriString)
+            val navigateBack = {
+                if (!navController.popBackStack()) {
+                    activity?.moveTaskToBack(true)
+                }
+                Unit
+            }
 
+            BackHandler(onBack = navigateBack)
             DocxViewerScreen(
                 uri = uri,
                 displayName = name.ifEmpty { null },
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = navigateBack,
             )
         }
 
@@ -246,11 +268,18 @@ fun MoDocsApp(
             val uriString = backStackEntry.arguments?.getString("uri") ?: ""
             val name = backStackEntry.arguments?.getString("name") ?: ""
             val uri = Uri.parse(uriString)
+            val navigateBack = {
+                if (!navController.popBackStack()) {
+                    activity?.moveTaskToBack(true)
+                }
+                Unit
+            }
 
+            BackHandler(onBack = navigateBack)
             XlsxViewerScreen(
                 uri = uri,
                 displayName = name.ifEmpty { null },
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = navigateBack,
             )
         }
 
@@ -268,11 +297,18 @@ fun MoDocsApp(
             val uriString = backStackEntry.arguments?.getString("uri") ?: ""
             val name = backStackEntry.arguments?.getString("name") ?: ""
             val uri = Uri.parse(uriString)
+            val navigateBack = {
+                if (!navController.popBackStack()) {
+                    activity?.moveTaskToBack(true)
+                }
+                Unit
+            }
 
+            BackHandler(onBack = navigateBack)
             PptxViewerScreen(
                 uri = uri,
                 displayName = name.ifEmpty { null },
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = navigateBack,
             )
         }
     }

@@ -14,15 +14,25 @@ android {
         applicationId = "com.modocs.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 163
-        versionName = "1.62"
+        versionCode = 165
+        versionName = "1.64"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getProperty("user.home") + "/modocs-release.jks")
+            storePassword = "modocs123"
+            keyAlias = "modocs"
+            keyPassword = "modocs123"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
