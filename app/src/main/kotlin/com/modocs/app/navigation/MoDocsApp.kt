@@ -35,6 +35,7 @@ import androidx.navigation.navArgument
 import com.modocs.core.common.DocumentType
 import com.modocs.feature.docx.DocxViewerScreen
 import com.modocs.feature.home.HomeScreen
+import com.modocs.feature.home.SettingsScreen
 import com.modocs.feature.pdf.PdfViewerScreen
 import com.modocs.feature.pptx.PptxViewerScreen
 import com.modocs.feature.xlsx.XlsxViewerScreen
@@ -192,7 +193,7 @@ fun MoDocsApp(
                     }
                 },
             ) {
-                PlaceholderScreen(title = "Settings")
+                SettingsScreen()
             }
         }
 
