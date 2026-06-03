@@ -15,3 +15,6 @@ local.properties
 
 # Gradle wrapper jar (some projects check this in, we don't)
 !gradle/wrapper/gradle-wrapper.jar
+
+# Local release artifacts
+dist/

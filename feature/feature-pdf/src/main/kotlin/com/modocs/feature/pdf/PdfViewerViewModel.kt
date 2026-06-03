@@ -155,7 +155,9 @@ class PdfViewerViewModel @Inject constructor(
                                 passwordError = null,
                                 pageCount = openResult.wrapper.pageCount,
                             )
-                            extractTextAsync(uri)
+                            // Extract from the decrypted file, not the still-encrypted source,
+                            // otherwise search finds nothing on password-protected PDFs.
+                            extractTextAsync(Uri.fromFile(result.tempFile))
                         }
                         else -> {
                             _state.value = _state.value.copy(

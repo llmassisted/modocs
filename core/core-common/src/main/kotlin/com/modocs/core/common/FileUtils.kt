@@ -5,9 +5,11 @@ import android.net.Uri
 import android.provider.OpenableColumns
 
 /**
- * Maximum file size allowed (20 MB).
+ * Maximum file size allowed (100 MB). Applied to both the in-app picker and
+ * documents opened from external apps. Note this is the *compressed* on-disk
+ * size; OOXML expansion is separately bounded by MAX_UNCOMPRESSED_BYTES.
  */
-const val MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024
+const val MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024
 
 enum class DocumentType(val displayName: String) {
     PDF("PDF"),

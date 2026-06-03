@@ -4,12 +4,11 @@ import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.modocs.core.common.readZipEntriesCapped
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.util.zip.ZipInputStream
 
 /**
  * Parses DOCX files (ZIP archives containing OOXML) into [DocxDocument].
@@ -43,20 +42,8 @@ object DocxParser {
      * Parse a DOCX file from an InputStream.
      */
     fun parse(inputStream: InputStream): DocxDocument {
-        // Step 1: Read all ZIP entries into memory
-        val entries = mutableMapOf<String, ByteArray>()
-        ZipInputStream(inputStream.buffered()).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                if (!entry.isDirectory) {
-                    val baos = ByteArrayOutputStream()
-                    zip.copyTo(baos)
-                    entries[entry.name] = baos.toByteArray()
-                }
-                zip.closeEntry()
-                entry = zip.nextEntry
-            }
-        }
+        // Step 1: Read all ZIP entries into memory (size-capped against zip bombs)
+        val entries = readZipEntriesCapped(inputStream)
 
         // Step 2: Parse relationships (for image references)
         val relationships = parseRelationships(entries["word/_rels/document.xml.rels"])

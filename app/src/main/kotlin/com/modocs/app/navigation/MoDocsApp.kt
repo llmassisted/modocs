@@ -2,6 +2,7 @@ package com.modocs.app.navigation
 
 import android.app.Activity
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,6 +40,17 @@ import com.modocs.feature.home.SettingsScreen
 import com.modocs.feature.pdf.PdfViewerScreen
 import com.modocs.feature.pptx.PptxViewerScreen
 import com.modocs.feature.xlsx.XlsxViewerScreen
+
+/**
+ * A request to open an externally-supplied document. [token] is unique per
+ * incoming intent so the navigation effect re-fires even when the same URI is
+ * reopened (value-equal URIs would otherwise be skipped).
+ */
+data class DocumentRequest(
+    val uri: Uri,
+    val type: DocumentType,
+    val token: Int,
+)
 
 object Routes {
     const val FILES = "files"
@@ -112,24 +124,30 @@ enum class TopLevelDestination(
 
 @Composable
 fun MoDocsApp(
-    initialDocumentUri: Uri? = null,
-    initialDocumentType: DocumentType? = null,
-    isOpenedExternally: Boolean = false,
+    documentRequest: DocumentRequest? = null,
 ) {
     val navController = rememberNavController()
     var selectedDestination by rememberSaveable { mutableStateOf(TopLevelDestination.FILES) }
-    val activity = LocalContext.current as? Activity
+    val context = LocalContext.current
+    val activity = context as? Activity
 
-    // Handle intent-based document opening
-    LaunchedEffect(initialDocumentUri) {
-        if (initialDocumentUri != null) {
-            val docType = initialDocumentType ?: DocumentType.PDF
-            navController.navigate(Routes.viewerForType(initialDocumentUri, docType)) {
-                if (isOpenedExternally) {
-                    popUpTo(navController.graph.startDestinationId) { inclusive = true }
-                }
-                launchSingleTop = true
-            }
+    // Handle intent-based document opening. Keyed on the token (not the URI value)
+    // so reopening the same file still navigates, and a stale value never blocks it.
+    // LaunchedEffect already runs once per distinct token, so no extra guard is needed.
+    LaunchedEffect(documentRequest?.token) {
+        val request = documentRequest ?: return@LaunchedEffect
+
+        if (request.type == DocumentType.UNKNOWN) {
+            // Don't guess a viewer for an unrecognized file — tell the user instead.
+            Toast.makeText(context, "Unsupported file type", Toast.LENGTH_LONG).show()
+            return@LaunchedEffect
+        }
+
+        navController.navigate(Routes.viewerForType(request.uri, request.type)) {
+            // Externally-opened documents replace the whole back stack so Back exits
+            // the app (matches the "open as a separate app" behaviour).
+            popUpTo(navController.graph.startDestinationId) { inclusive = true }
+            launchSingleTop = true
         }
     }
 

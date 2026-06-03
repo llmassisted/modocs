@@ -4,12 +4,11 @@ import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.modocs.core.common.readZipEntriesCapped
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.util.zip.ZipInputStream
 
 /**
  * Parses XLSX files (ZIP archives containing SpreadsheetML) into [XlsxDocument].
@@ -33,20 +32,8 @@ object XlsxParser {
     }
 
     fun parse(inputStream: InputStream): XlsxDocument {
-        // Step 1: Read all ZIP entries
-        val entries = mutableMapOf<String, ByteArray>()
-        ZipInputStream(inputStream.buffered()).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                if (!entry.isDirectory) {
-                    val baos = ByteArrayOutputStream()
-                    zip.copyTo(baos)
-                    entries[entry.name] = baos.toByteArray()
-                }
-                zip.closeEntry()
-                entry = zip.nextEntry
-            }
-        }
+        // Step 1: Read all ZIP entries (size-capped against zip bombs)
+        val entries = readZipEntriesCapped(inputStream)
 
         // Step 2: Parse workbook relationships
         val rels = parseRelationships(entries["xl/_rels/workbook.xml.rels"])

@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import org.apache.poi.poifs.crypt.Decryptor
 import org.apache.poi.poifs.crypt.EncryptionInfo
 import org.apache.poi.poifs.filesystem.POIFSFileSystem
+import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.security.GeneralSecurityException
 
@@ -55,20 +56,24 @@ object OoxmlDecryptor {
     suspend fun decrypt(context: Context, uri: Uri, password: String): DecryptResult =
         withContext(Dispatchers.IO) {
             try {
-                val inputStream = context.contentResolver.openInputStream(uri)
-                    ?: return@withContext DecryptResult.Failed("Cannot open file")
+                context.contentResolver.openInputStream(uri).use { inputStream ->
+                    if (inputStream == null) {
+                        return@withContext DecryptResult.Failed("Cannot open file")
+                    }
+                    POIFSFileSystem(inputStream).use { poifs ->
+                        val info = EncryptionInfo(poifs)
+                        val decryptor = Decryptor.getInstance(info)
 
-                val poifs = POIFSFileSystem(inputStream)
-                val info = EncryptionInfo(poifs)
-                val decryptor = Decryptor.getInstance(info)
+                        if (!decryptor.verifyPassword(password)) {
+                            return@withContext DecryptResult.WrongPassword
+                        }
 
-                if (!decryptor.verifyPassword(password)) {
-                    poifs.close()
-                    return@withContext DecryptResult.WrongPassword
+                        // Read the decrypted package fully into memory so the result is
+                        // self-contained; the POIFS/source stream are closed on return.
+                        val bytes = decryptor.getDataStream(poifs).use { it.readBytes() }
+                        DecryptResult.Success(ByteArrayInputStream(bytes))
+                    }
                 }
-
-                val decryptedStream = decryptor.getDataStream(poifs)
-                DecryptResult.Success(decryptedStream)
             } catch (_: GeneralSecurityException) {
                 DecryptResult.WrongPassword
             } catch (e: Exception) {

@@ -93,6 +93,12 @@ class AppUpdateChecker @Inject constructor(
 
         try {
             val url = URL(downloadUrl)
+            // Only fetch the APK over TLS — never install a binary pulled over cleartext.
+            if (!url.protocol.equals("https", ignoreCase = true)) {
+                return@withContext Result.failure(
+                    SecurityException("Refusing non-HTTPS update URL"),
+                )
+            }
             val connection = url.openConnection() as HttpURLConnection
             connection.connectTimeout = 15_000
             connection.readTimeout = 60_000
