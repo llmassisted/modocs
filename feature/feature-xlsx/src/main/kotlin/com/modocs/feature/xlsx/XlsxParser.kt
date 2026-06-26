@@ -431,6 +431,9 @@ object XlsxParser {
                                     type = type,
                                     styleIndex = currentCellStyle,
                                     formula = currentFormula.toString().ifEmpty { null },
+                                    rawValue = rawValue.takeIf {
+                                        type == CellType.NUMBER || type == CellType.DATE
+                                    },
                                 )
                             )
                             inCell = false

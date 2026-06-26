@@ -12,7 +12,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -89,8 +91,17 @@ class PdfViewerViewModel @Inject constructor(
     private val _fillSignState = MutableStateFlow(FillSignState())
     val fillSignState: StateFlow<FillSignState> = _fillSignState.asStateFlow()
 
+    sealed interface PdfEvent {
+        data class SaveSuccess(val message: String) : PdfEvent
+        data class SaveError(val message: String) : PdfEvent
+    }
+
+    private val _events = MutableSharedFlow<PdfEvent>()
+    val events = _events.asSharedFlow()
+
     private var pdfRenderer: PdfRendererWrapper? = null
     private var documentUri: Uri? = null
+    private var renderSourceUri: Uri? = null
     private var pageTexts: List<PdfTextExtractor.PageText> = emptyList()
     private var searchJob: Job? = null
     private var decryptedTempFile: java.io.File? = null
@@ -101,6 +112,7 @@ class PdfViewerViewModel @Inject constructor(
         if (pdfRenderer != null) return
 
         documentUri = uri
+        renderSourceUri = uri
 
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, errorMessage = null)
@@ -145,10 +157,12 @@ class PdfViewerViewModel @Inject constructor(
             when (val result = PdfDecryptor.decrypt(context, uri, password)) {
                 is PdfDecryptor.DecryptResult.Success -> {
                     decryptedTempFile = result.tempFile
+                    val decryptedUri = Uri.fromFile(result.tempFile)
 
                     when (val openResult = PdfRendererWrapper.openFile(result.tempFile)) {
                         is PdfOpenResult.Success -> {
                             pdfRenderer = openResult.wrapper
+                            renderSourceUri = decryptedUri
                             _state.value = _state.value.copy(
                                 isLoading = false,
                                 isPasswordRequired = false,
@@ -157,7 +171,7 @@ class PdfViewerViewModel @Inject constructor(
                             )
                             // Extract from the decrypted file, not the still-encrypted source,
                             // otherwise search finds nothing on password-protected PDFs.
-                            extractTextAsync(Uri.fromFile(result.tempFile))
+                            extractTextAsync(decryptedUri)
                         }
                         else -> {
                             _state.value = _state.value.copy(
@@ -676,7 +690,7 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun saveFilled(outputUri: Uri) {
-        val srcUri = documentUri ?: return
+        val srcUri = renderSourceUri ?: documentUri ?: return
         val pageCount = _state.value.pageCount
         val annotations = _fillSignState.value.annotations
 
@@ -694,11 +708,10 @@ class PdfViewerViewModel @Inject constructor(
                     isSaving = false,
                     isDirty = false,
                 )
+                _events.emit(PdfEvent.SaveSuccess("PDF saved successfully"))
             } catch (e: Exception) {
                 _fillSignState.value = _fillSignState.value.copy(isSaving = false)
-                _state.value = _state.value.copy(
-                    errorMessage = "Failed to save: ${e.message}",
-                )
+                _events.emit(PdfEvent.SaveError("Failed to save: ${e.message ?: "Unknown error"}"))
             }
         }
     }

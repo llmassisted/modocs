@@ -86,7 +86,9 @@ class PptxViewerViewModel @Inject constructor(
 
     private var searchJob: Job? = null
     private var documentUri: Uri? = null
-    private val slideBitmapCache = mutableMapOf<Int, Bitmap>()
+    private data class SlideBitmapCacheKey(val slideIndex: Int, val targetWidth: Int)
+
+    private val slideBitmapCache = LinkedHashMap<SlideBitmapCacheKey, Bitmap>(8, 0.75f, true)
     private val renderMutex = Mutex()
 
     fun loadPptx(uri: Uri, displayName: String?) {
@@ -100,7 +102,7 @@ class PptxViewerViewModel @Inject constructor(
             val name = displayName ?: resolveFileName(uri) ?: "Presentation"
 
             // Check if file is password-protected (OLE2 container)
-            if (OoxmlDecryptor.isOle2File(context, uri)) {
+            if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
                 _state.value = _state.value.copy(
                     isLoading = false,
                     isPasswordRequired = true,
@@ -194,8 +196,8 @@ class PptxViewerViewModel @Inject constructor(
             val doc = _state.value.document ?: return@withContext null
             val slide = doc.slides.getOrNull(slideIndex) ?: return@withContext null
 
-            val cached = slideBitmapCache[slideIndex]
-            if (cached != null && cached.width == targetWidth) return@withContext cached
+            val cacheKey = SlideBitmapCacheKey(slideIndex, targetWidth)
+            slideBitmapCache[cacheKey]?.let { return@withContext it }
 
             val aspectRatio = doc.slideHeight.toFloat() / doc.slideWidth.toFloat()
             val targetHeight = (targetWidth * aspectRatio).toInt()
@@ -220,8 +222,16 @@ class PptxViewerViewModel @Inject constructor(
                 renderShape(canvas, shape, slide, scaleX, scaleY)
             }
 
-            slideBitmapCache[slideIndex] = bitmap
+            slideBitmapCache[cacheKey] = bitmap
+            trimSlideBitmapCache()
             bitmap
+        }
+    }
+
+    private fun trimSlideBitmapCache() {
+        while (slideBitmapCache.size > MAX_SLIDE_BITMAP_CACHE_SIZE) {
+            val oldestKey = slideBitmapCache.keys.first()
+            slideBitmapCache.remove(oldestKey)
         }
     }
 
@@ -615,5 +625,9 @@ class PptxViewerViewModel @Inject constructor(
         searchJob?.cancel()
         slideBitmapCache.values.forEach { it.recycle() }
         slideBitmapCache.clear()
+    }
+
+    private companion object {
+        const val MAX_SLIDE_BITMAP_CACHE_SIZE = 6
     }
 }

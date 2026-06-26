@@ -88,7 +88,7 @@ class XlsxViewerViewModel @Inject constructor(
             val name = displayName ?: resolveFileName(uri) ?: "Spreadsheet"
 
             // Check if file is password-protected (OLE2 container)
-            if (OoxmlDecryptor.isOle2File(context, uri)) {
+            if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
                 _state.value = _state.value.copy(
                     isLoading = false,
                     isPasswordRequired = true,
@@ -288,14 +288,19 @@ class XlsxViewerViewModel @Inject constructor(
             if (cellIdx >= 0) {
                 // Update existing cell
                 val oldCell = row.cells[cellIdx]
-                row.cells[cellIdx] = oldCell.copy(value = newValue)
+                row.cells[cellIdx] = oldCell.copy(
+                    value = newValue,
+                    type = inferEditedCellType(newValue),
+                    formula = null,
+                    rawValue = null,
+                )
             } else {
                 // Add a new cell to this row
                 row.cells.add(
                     XlsxCell(
                         columnIndex = colIndex,
                         value = newValue,
-                        type = CellType.STRING,
+                        type = inferEditedCellType(newValue),
                     )
                 )
             }
@@ -308,7 +313,7 @@ class XlsxViewerViewModel @Inject constructor(
                         XlsxCell(
                             columnIndex = colIndex,
                             value = newValue,
-                            type = CellType.STRING,
+                            type = inferEditedCellType(newValue),
                         )
                     ),
                 )
@@ -350,6 +355,10 @@ class XlsxViewerViewModel @Inject constructor(
                 _events.emit(XlsxEvent.SaveError("Save failed: ${e.message ?: "Unknown error"}"))
             }
         }
+    }
+
+    private fun inferEditedCellType(value: String): CellType {
+        return if (value.toDoubleOrNull() != null) CellType.NUMBER else CellType.STRING
     }
 
     // --- Helpers ---

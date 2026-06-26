@@ -155,13 +155,8 @@ class AppUpdateChecker @Inject constructor(
             "https://api.github.com/repos/llmassisted/modocs/releases/latest"
 
         fun isNewerVersion(remote: String, current: String): Boolean {
-            val remoteNum = remote.toDoubleOrNull()
-            val currentNum = current.toDoubleOrNull()
-            if (remoteNum != null && currentNum != null) {
-                return remoteNum > currentNum
-            }
-            val remoteParts = remote.split(".").mapNotNull { it.toIntOrNull() }
-            val currentParts = current.split(".").mapNotNull { it.toIntOrNull() }
+            val remoteParts = parseVersionParts(remote)
+            val currentParts = parseVersionParts(current)
             val maxLen = maxOf(remoteParts.size, currentParts.size)
             for (i in 0 until maxLen) {
                 val r = remoteParts.getOrElse(i) { 0 }
@@ -170,6 +165,16 @@ class AppUpdateChecker @Inject constructor(
                 if (r < c) return false
             }
             return false
+        }
+
+        private fun parseVersionParts(version: String): List<Int> {
+            return version
+                .trim()
+                .removePrefix("v")
+                .split('.', '-', '_')
+                .mapNotNull { part ->
+                    part.takeWhile { it.isDigit() }.takeIf { it.isNotEmpty() }?.toIntOrNull()
+                }
         }
     }
 }

@@ -13,7 +13,7 @@ If you're like me, you sometimes use your phone to look at docs, fill out forms,
 
 ## Installation
 
-Grab the latest APK from [Releases](https://github.com/NotShivang/modocs/releases) and sideload it on your Android device.
+Grab the latest APK from [Releases](https://github.com/llmassisted/modocs/releases) and sideload it on your Android device.
 
 **Requires Android 8.0 (API 26) or higher.**
 
@@ -79,7 +79,7 @@ PRs welcome for any of these.
 
 ```bash
 # Clone the repo
-git clone https://github.com/NotShivang/modocs.git
+git clone https://github.com/llmassisted/modocs.git
 cd modocs
 
 # Build debug APK

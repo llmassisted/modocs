@@ -49,6 +49,25 @@ object OoxmlDecryptor {
     }
 
     /**
+     * Check whether an OLE2 file has the encrypted OOXML package streams.
+     * Legacy binary Office files are also OLE2, but they do not contain these
+     * entries and should not be presented as password-protected DOCX/XLSX/PPTX.
+     */
+    suspend fun isEncryptedOoxmlFile(context: Context, uri: Uri): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    POIFSFileSystem(inputStream).use { poifs ->
+                        val root = poifs.root
+                        root.hasEntry("EncryptedPackage") && root.hasEntry("EncryptionInfo")
+                    }
+                } ?: false
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+    /**
      * Decrypt a password-protected OOXML file.
      * Returns the decrypted ZIP stream on success, which can be passed directly
      * to existing OOXML parsers (DocxParser, XlsxParser, PptxParser).

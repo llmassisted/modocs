@@ -30,13 +30,12 @@ data class XlsxSheet(
     val frozenRows: Int = 0,
 ) {
     /** Maximum column index across all rows. */
-    val columnCount: Int by lazy {
-        rows.maxOfOrNull { row -> row.cells.maxOfOrNull { it.columnIndex + 1 } ?: 0 } ?: 0
-    }
+    val columnCount: Int
+        get() = rows.maxOfOrNull { row -> row.cells.maxOfOrNull { it.columnIndex + 1 } ?: 0 } ?: 0
 
     /** Get a cell at the given row/column, or null. */
     fun cellAt(rowIndex: Int, colIndex: Int): XlsxCell? {
-        val row = rows.getOrNull(rowIndex) ?: return null
+        val row = rows.find { it.rowIndex == rowIndex } ?: return null
         return row.cells.find { it.columnIndex == colIndex }
     }
 }
@@ -55,6 +54,8 @@ data class XlsxCell(
     val styleIndex: Int = 0,
     /** Raw formula text, if any. */
     val formula: String? = null,
+    /** Raw OOXML cached value. For numbers/dates this differs from the formatted display value. */
+    val rawValue: String? = null,
 )
 
 enum class CellType {

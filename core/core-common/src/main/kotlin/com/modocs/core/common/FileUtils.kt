@@ -21,12 +21,9 @@ enum class DocumentType(val displayName: String) {
     companion object {
         fun fromMimeType(mimeType: String?): DocumentType = when (mimeType) {
             "application/pdf" -> PDF
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/msword" -> DOCX
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-excel" -> XLSX
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/vnd.ms-powerpoint" -> PPTX
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> DOCX
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> XLSX
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> PPTX
             else -> UNKNOWN
         }
 
@@ -34,9 +31,9 @@ enum class DocumentType(val displayName: String) {
             val ext = name.substringAfterLast('.', "").lowercase()
             return when (ext) {
                 "pdf" -> PDF
-                "docx", "doc" -> DOCX
-                "xlsx", "xls" -> XLSX
-                "pptx", "ppt" -> PPTX
+                "docx" -> DOCX
+                "xlsx" -> XLSX
+                "pptx" -> PPTX
                 else -> UNKNOWN
             }
         }

@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Writes a filled/signed PDF by rendering each page bitmap
@@ -32,8 +33,7 @@ object PdfDocumentWriter {
         annotations: List<PdfAnnotation>,
     ) = withContext(Dispatchers.IO) {
         // Open a dedicated renderer for saving — separate from the viewer's renderer
-        val fd = context.contentResolver.openFileDescriptor(sourceUri, "r")
-            ?: throw IllegalStateException("Cannot open source PDF")
+        val fd = openReadDescriptor(context, sourceUri)
 
         val reader = AndroidPdfRenderer(fd)
         val pdfDoc = PdfDocument()
@@ -78,6 +78,15 @@ object PdfDocumentWriter {
             reader.close()
             fd.close()
         }
+    }
+
+    private fun openReadDescriptor(context: Context, uri: Uri): ParcelFileDescriptor {
+        if (uri.scheme == "file") {
+            val path = uri.path ?: throw IllegalStateException("Cannot open source PDF")
+            return ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
+        }
+        return context.contentResolver.openFileDescriptor(uri, "r")
+            ?: throw IllegalStateException("Cannot open source PDF")
     }
 
     private fun drawAnnotation(

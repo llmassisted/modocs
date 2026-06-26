@@ -11,7 +11,7 @@ import java.util.zip.ZipOutputStream
 /**
  * Writes a [XlsxDocument] back to an XLSX ZIP file.
  * Uses round-trip approach: copies all original ZIP entries unchanged,
- * except modified sheet XMLs and sharedStrings.xml which are regenerated.
+ * except modified sheet XMLs which are regenerated.
  */
 object XlsxWriter {
 
@@ -24,19 +24,11 @@ object XlsxWriter {
     }
 
     fun write(document: XlsxDocument, outputStream: OutputStream) {
-        // Build a new shared string table from all cell values
-        val sharedStrings = buildSharedStringTable(document)
-        val sharedStringXml = generateSharedStringsXml(sharedStrings)
-
         // Determine which ZIP entries need to be replaced
         val modifiedPaths = mutableSetOf<String>()
         for (sheetIdx in document.modifiedSheets) {
             val path = document.sheetPaths[sheetIdx]
             if (path != null) modifiedPaths.add(path)
-        }
-        // Always regenerate sharedStrings if any sheet was modified
-        if (document.modifiedSheets.isNotEmpty()) {
-            modifiedPaths.add("xl/sharedStrings.xml")
         }
 
         ZipOutputStream(outputStream).use { zip ->
@@ -52,59 +44,12 @@ object XlsxWriter {
             for (sheetIdx in document.modifiedSheets) {
                 val path = document.sheetPaths[sheetIdx] ?: continue
                 val sheet = document.sheets.getOrNull(sheetIdx) ?: continue
-                val sheetXml = generateSheetXml(sheet, sharedStrings, document)
+                val sheetXml = generateSheetXml(sheet)
                 zip.putNextEntry(ZipEntry(path))
                 zip.write(sheetXml.toByteArray(Charsets.UTF_8))
                 zip.closeEntry()
             }
-
-            // Write updated sharedStrings.xml if needed
-            if (document.modifiedSheets.isNotEmpty()) {
-                zip.putNextEntry(ZipEntry("xl/sharedStrings.xml"))
-                zip.write(sharedStringXml.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
-            }
         }
-    }
-
-    /**
-     * Build a shared string table mapping string value -> index.
-     * Collects all string cell values across all sheets.
-     */
-    private fun buildSharedStringTable(document: XlsxDocument): Map<String, Int> {
-        val strings = linkedMapOf<String, Int>()
-        for (sheet in document.sheets) {
-            for (row in sheet.rows) {
-                for (cell in row.cells) {
-                    if (cell.type == CellType.STRING || cell.type == CellType.INLINE_STRING) {
-                        if (cell.value !in strings) {
-                            strings[cell.value] = strings.size
-                        }
-                    }
-                }
-            }
-        }
-        return strings
-    }
-
-    private fun generateSharedStringsXml(strings: Map<String, Int>): String {
-        val sb = StringBuilder()
-        sb.append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""")
-        sb.append("\n")
-        sb.append("""<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"""")
-        sb.append(""" count="${strings.size}" uniqueCount="${strings.size}">""")
-        sb.append("\n")
-        for ((text, _) in strings) {
-            sb.append("<si><t")
-            if (text.isNotEmpty() && (text[0] == ' ' || text[text.length - 1] == ' ')) {
-                sb.append(""" xml:space="preserve"""")
-            }
-            sb.append(">")
-            sb.append(escXml(text))
-            sb.append("</t></si>\n")
-        }
-        sb.append("</sst>")
-        return sb.toString()
     }
 
     /**
@@ -114,8 +59,6 @@ object XlsxWriter {
      */
     private fun generateSheetXml(
         sheet: XlsxSheet,
-        sharedStrings: Map<String, Int>,
-        document: XlsxDocument,
     ): String {
         // For simplicity and reliability, we rebuild the essential sheet XML.
         // We preserve column widths, merged cells, and freeze pane settings.
@@ -156,20 +99,24 @@ object XlsxWriter {
 
                 when (cell.type) {
                     CellType.STRING, CellType.INLINE_STRING -> {
-                        // Use shared string reference
-                        val ssIdx = sharedStrings[cell.value]
-                        sb.append(""" t="s"""")
                         if (cell.styleIndex != 0) {
                             sb.append(""" s="${cell.styleIndex}"""")
                         }
-                        sb.append(">")
                         if (cell.formula != null) {
+                            sb.append(""" t="str">""")
                             sb.append("<f>")
                             sb.append(escXml(cell.formula))
                             sb.append("</f>")
-                        }
-                        if (ssIdx != null) {
-                            sb.append("<v>$ssIdx</v>")
+                            sb.append("<v>")
+                            sb.append(escXml(cell.rawValue ?: cell.value))
+                            sb.append("</v>")
+                        } else {
+                            sb.append(""" t="inlineStr">""")
+                            sb.append("<is><t")
+                            appendSpacePreserveIfNeeded(sb, cell.value)
+                            sb.append(">")
+                            sb.append(escXml(cell.value))
+                            sb.append("</t></is>")
                         }
                     }
                     CellType.NUMBER, CellType.DATE -> {
@@ -183,7 +130,7 @@ object XlsxWriter {
                             sb.append("</f>")
                         }
                         sb.append("<v>")
-                        sb.append(escXml(cell.value))
+                        sb.append(escXml(cell.rawValue ?: cell.value))
                         sb.append("</v>")
                     }
                     CellType.BOOLEAN -> {
@@ -241,6 +188,12 @@ object XlsxWriter {
 
         sb.append("</worksheet>")
         return sb.toString()
+    }
+
+    private fun appendSpacePreserveIfNeeded(sb: StringBuilder, text: String) {
+        if (text.isNotEmpty() && (text.first() == ' ' || text.last() == ' ')) {
+            sb.append(""" xml:space="preserve"""")
+        }
     }
 
     /** Convert 0-based column index to Excel-style letter (A, B, ..., Z, AA, AB, ...). */

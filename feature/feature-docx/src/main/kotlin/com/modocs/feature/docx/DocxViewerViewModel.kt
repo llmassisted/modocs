@@ -139,7 +139,7 @@ class DocxViewerViewModel @Inject constructor(
                 ?: "Document"
 
             // Check if file is password-protected (OLE2 container)
-            if (OoxmlDecryptor.isOle2File(context, uri)) {
+            if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
                 _state.value = _state.value.copy(
                     isLoading = false,
                     isPasswordRequired = true,

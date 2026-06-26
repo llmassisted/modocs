@@ -295,8 +295,9 @@ object DocxParser {
                     depth++
                     when (parser.name) {
                         "p" -> {
-                            val para = parseParagraph(parser, styles, relationships)
-                            elements.add(para)
+                            val parsed = parseParagraph(parser, styles, relationships)
+                            elements.add(parsed.paragraph)
+                            elements.addAll(parsed.images)
                             depth-- // parseParagraph consumes the end tag
                         }
                         "tbl" -> {
@@ -359,12 +360,18 @@ object DocxParser {
 
     // --- Paragraph parsing ---
 
+    private data class ParsedParagraph(
+        val paragraph: DocxParagraph,
+        val images: List<DocxImage>,
+    )
+
     private fun parseParagraph(
         parser: XmlPullParser,
         styles: Map<String, DocxStyle>,
         relationships: Map<String, String>,
-    ): DocxParagraph {
+    ): ParsedParagraph {
         val runs = mutableListOf<DocxRun>()
+        val images = mutableListOf<DocxImage>()
         var paraProps = ParagraphProperties()
         var listInfo: ListInfo? = null
         var depth = 1
@@ -392,8 +399,7 @@ object DocxParser {
                         "drawing" -> {
                             val image = parseDrawing(parser, relationships)
                             if (image != null) {
-                                // Wrap image in a special run placeholder
-                                runs.add(DocxRun("\uFFFC", RunProperties())) // object replacement char
+                                images.add(image)
                             }
                             depth-- // consumed end tag
                         }
@@ -406,7 +412,7 @@ object DocxParser {
         // Apply style to paragraph properties if style is referenced
         val styledProps = applyStyleToParaProps(paraProps, styles)
 
-        return DocxParagraph(runs, styledProps, listInfo)
+        return ParsedParagraph(DocxParagraph(runs, styledProps, listInfo), images)
     }
 
     private fun parseParagraphProperties(
@@ -900,7 +906,7 @@ object DocxParser {
                             depth--
                         }
                         "p" -> {
-                            paragraphs.add(parseParagraph(parser, styles, relationships))
+                            paragraphs.add(parseParagraph(parser, styles, relationships).paragraph)
                             depth--
                         }
                     }

@@ -6,6 +6,21 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+val releaseStoreFilePath = providers.gradleProperty("MODOCS_RELEASE_STORE_FILE").orNull
+    ?: System.getenv("MODOCS_RELEASE_STORE_FILE")
+val releaseStorePassword = providers.gradleProperty("MODOCS_RELEASE_STORE_PASSWORD").orNull
+    ?: System.getenv("MODOCS_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = providers.gradleProperty("MODOCS_RELEASE_KEY_ALIAS").orNull
+    ?: System.getenv("MODOCS_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = providers.gradleProperty("MODOCS_RELEASE_KEY_PASSWORD").orNull
+    ?: System.getenv("MODOCS_RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseStoreFilePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.modocs.app"
     compileSdk = 35
@@ -14,25 +29,29 @@ android {
         applicationId = "com.modocs.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 172
-        versionName = "1.72"
+        versionCode = 173
+        versionName = "1.73"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getProperty("user.home") + "/modocs-release.jks")
-            storePassword = "modocs123"
-            keyAlias = "modocs"
-            keyPassword = "modocs123"
+            if (hasReleaseSigning) {
+                storeFile = file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

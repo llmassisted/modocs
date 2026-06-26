@@ -70,7 +70,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -101,7 +100,6 @@ import androidx.compose.ui.unit.toSize
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
 
 // Highlight colors
 private val HighlightYellow = Color(0x66FFEB3B)
@@ -121,10 +119,20 @@ fun PdfViewerScreen(
     val fillSignState by viewModel.fillSignState.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(uri) {
         viewModel.loadPdf(uri, displayName)
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            when (event) {
+                is PdfViewerViewModel.PdfEvent.SaveSuccess ->
+                    snackbarHostState.showSnackbar(event.message)
+                is PdfViewerViewModel.PdfEvent.SaveError ->
+                    snackbarHostState.showSnackbar(event.message)
+            }
+        }
     }
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
@@ -142,9 +150,6 @@ fun PdfViewerScreen(
     ) { outputUri ->
         if (outputUri != null) {
             viewModel.saveFilled(outputUri)
-            scope.launch {
-                snackbarHostState.showSnackbar("PDF saved successfully")
-            }
         }
     }
 
