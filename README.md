@@ -35,6 +35,8 @@ Grab the latest APK from [Releases](https://github.com/llmassisted/modocs/releas
 ### PDF
 - Fill & sign flattens annotations onto a re-rendered copy of the PDF (not a direct edit of the original file structure)
 - Very large PDFs may be slow to save
+- Text search is unavailable on PDFs over 32 MB — viewing and fill & sign still work; the cap keeps a huge file from exhausting memory
+- Pages with an extreme aspect ratio are rasterised at reduced resolution when saving a filled copy
 
 ## Roadmap
 

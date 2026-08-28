@@ -4,10 +4,10 @@ import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.modocs.core.common.createXmlParser
 import com.modocs.core.common.readZipEntriesCapped
+import com.modocs.core.common.tolerateParse
 import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
-import java.io.ByteArrayInputStream
 import java.io.InputStream
 
 /**
@@ -32,32 +32,38 @@ object XlsxParser {
     }
 
     fun parse(inputStream: InputStream): XlsxDocument {
-        // Step 1: Read all ZIP entries (size-capped against zip bombs)
+        // Step 1: Read all ZIP entries (size-capped against zip bombs).
+        // This one genuinely cannot be recovered from — without entries there is
+        // no document — so it is the only step allowed to propagate.
         val entries = readZipEntriesCapped(inputStream)
 
-        // Step 2: Parse workbook relationships
-        val rels = parseRelationships(entries["xl/_rels/workbook.xml.rels"])
+        // Steps 2-5: every remaining part is optional. A malformed styles.xml or
+        // relationship part should cost the user formatting, not the whole file,
+        // so each part degrades to its empty value independently.
+        val rels = tolerate("workbook relationships", emptyMap()) {
+            parseRelationships(entries["xl/_rels/workbook.xml.rels"])
+        }
+        val sharedStrings = tolerate("shared strings", emptyList<String>()) {
+            entries["xl/sharedStrings.xml"]?.let { parseSharedStrings(it) } ?: emptyList()
+        }
+        val styles = tolerate("styles", emptyList<XlsxCellStyle>()) {
+            entries["xl/styles.xml"]?.let { parseStyles(it) } ?: emptyList()
+        }
+        val sheetInfos = tolerate("workbook", emptyList<SheetInfo>()) {
+            entries["xl/workbook.xml"]?.let { parseWorkbook(it) } ?: emptyList()
+        }.ifEmpty { discoverSheets(entries) }
 
-        // Step 3: Parse shared strings
-        val sharedStrings = entries["xl/sharedStrings.xml"]?.let { parseSharedStrings(it) }
-            ?: emptyList()
-
-        // Step 4: Parse styles
-        val styles = entries["xl/styles.xml"]?.let { parseStyles(it) } ?: emptyList()
-
-        // Step 5: Parse workbook (sheet names and rIds)
-        val sheetInfos = entries["xl/workbook.xml"]?.let { parseWorkbook(it) } ?: emptyList()
-
-        // Step 6: Parse each sheet, tracking ZIP paths
+        // Step 6: Parse each sheet, tracking ZIP paths. A sheet that fails to
+        // parse is skipped rather than aborting the workbook.
         val sheetPathMap = mutableMapOf<Int, String>()
         val sheets = mutableListOf<XlsxSheet>()
         var sheetIndex = 0
-        for (info in sheetInfos) {
-            val target = rels[info.rId] ?: continue
-            val sheetPath = if (target.startsWith("/")) target.removePrefix("/")
-            else "xl/$target"
+        for ((ordinal, info) in sheetInfos.withIndex()) {
+            val sheetPath = resolveSheetPath(info, ordinal, rels, entries) ?: continue
             val sheetBytes = entries[sheetPath] ?: continue
-            val sheet = parseSheet(info.name, sheetBytes, sharedStrings, styles)
+            val sheet = tolerate<XlsxSheet?>("sheet '${info.name}'", null) {
+                parseSheet(info.name, sheetBytes, sharedStrings, styles)
+            } ?: continue
             sheets.add(sheet)
             sheetPathMap[sheetIndex] = sheetPath
             sheetIndex++
@@ -69,6 +75,44 @@ object XlsxParser {
             rawEntries = entries,
             sheetPaths = sheetPathMap,
         )
+    }
+
+    private inline fun <T> tolerate(what: String, fallback: T, block: () -> T): T =
+        tolerateParse("XlsxParser", what, fallback, block)
+
+    /**
+     * Last-resort sheet discovery for when `xl/workbook.xml` is missing or
+     * unreadable: take the worksheet parts straight out of the archive in
+     * `sheetN` order. Names are synthesised, but the user gets their data.
+     */
+    private fun discoverSheets(entries: Map<String, ByteArray>): List<SheetInfo> {
+        val pattern = Regex("""^xl/worksheets/sheet(\d+)\.xml$""")
+        return entries.keys
+            .mapNotNull { key -> pattern.find(key)?.groupValues?.get(1)?.toIntOrNull()?.let { it to key } }
+            .sortedBy { it.first }
+            .map { (n, key) -> SheetInfo(name = "Sheet $n", rId = "", path = key) }
+    }
+
+    /**
+     * Locate a sheet's ZIP entry. Prefers the declared relationship; if the
+     * relationship part is missing or points at something that is not in the
+     * archive, falls back to the conventional `xl/worksheets/sheetN.xml` layout
+     * so the workbook still opens.
+     */
+    private fun resolveSheetPath(
+        info: SheetInfo,
+        ordinal: Int,
+        rels: Map<String, String>,
+        entries: Map<String, ByteArray>,
+    ): String? {
+        info.path?.let { return it.takeIf { p -> entries.containsKey(p) } }
+
+        val target = rels[info.rId]
+        if (target != null) {
+            val path = if (target.startsWith("/")) target.removePrefix("/") else "xl/$target"
+            if (entries.containsKey(path)) return path
+        }
+        return "xl/worksheets/sheet${ordinal + 1}.xml".takeIf { entries.containsKey(it) }
     }
 
     // --- Relationships ---
@@ -277,7 +321,12 @@ object XlsxParser {
 
     // --- Workbook ---
 
-    private data class SheetInfo(val name: String, val rId: String)
+    private data class SheetInfo(
+        val name: String,
+        val rId: String,
+        /** Set only by [discoverSheets], which already knows the exact ZIP path. */
+        val path: String? = null,
+    )
 
     private fun parseWorkbook(bytes: ByteArray): List<SheetInfo> {
         val sheets = mutableListOf<SheetInfo>()
@@ -530,11 +579,5 @@ object XlsxParser {
         }
     }
 
-    private fun createParser(bytes: ByteArray): XmlPullParser {
-        val factory = XmlPullParserFactory.newInstance()
-        factory.isNamespaceAware = true
-        val parser = factory.newPullParser()
-        parser.setInput(ByteArrayInputStream(bytes), "UTF-8")
-        return parser
-    }
+    private fun createParser(bytes: ByteArray): XmlPullParser = createXmlParser(bytes)
 }

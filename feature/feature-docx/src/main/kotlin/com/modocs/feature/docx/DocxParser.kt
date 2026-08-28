@@ -4,10 +4,10 @@ import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.modocs.core.common.createXmlParser
 import com.modocs.core.common.readZipEntriesCapped
+import com.modocs.core.common.tolerateParse
 import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
-import java.io.ByteArrayInputStream
 import java.io.InputStream
 
 /**
@@ -45,14 +45,17 @@ object DocxParser {
         // Step 1: Read all ZIP entries into memory (size-capped against zip bombs)
         val entries = readZipEntriesCapped(inputStream)
 
-        // Step 2: Parse relationships (for image references)
-        val relationships = parseRelationships(entries["word/_rels/document.xml.rels"])
-
-        // Step 3: Parse styles
-        val styles = entries["word/styles.xml"]?.let { parseStyles(it) } ?: emptyMap()
-
-        // Step 4: Parse numbering
-        val numbering = entries["word/numbering.xml"]?.let { parseNumbering(it) } ?: emptyMap()
+        // Steps 2-4: relationships, styles and numbering are all optional. A
+        // malformed one costs the user images or formatting, not the document.
+        val relationships = tolerate("relationships", emptyMap<String, String>()) {
+            parseRelationships(entries["word/_rels/document.xml.rels"])
+        }
+        val styles = tolerate("styles", emptyMap<String, DocxStyle>()) {
+            entries["word/styles.xml"]?.let { parseStyles(it) } ?: emptyMap()
+        }
+        val numbering = tolerate("numbering", emptyMap<String, NumberingDefinition>()) {
+            entries["word/numbering.xml"]?.let { parseNumbering(it) } ?: emptyMap()
+        }
 
         // Step 5: Extract images
         val images = mutableMapOf<String, ByteArray>()
@@ -1085,13 +1088,10 @@ object DocxParser {
         )
     }
 
-    private fun createParser(bytes: ByteArray): XmlPullParser {
-        val factory = XmlPullParserFactory.newInstance()
-        factory.isNamespaceAware = true
-        val parser = factory.newPullParser()
-        parser.setInput(ByteArrayInputStream(bytes), "UTF-8")
-        return parser
-    }
+    private fun createParser(bytes: ByteArray): XmlPullParser = createXmlParser(bytes)
+
+    private inline fun <T> tolerate(what: String, fallback: T, block: () -> T): T =
+        tolerateParse("DocxParser", what, fallback, block)
 
     /** Helper to get attribute value ignoring namespace. */
     private fun XmlPullParser.getAttr(name: String): String? {

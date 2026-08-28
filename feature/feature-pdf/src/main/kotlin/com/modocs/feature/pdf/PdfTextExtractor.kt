@@ -2,6 +2,7 @@ package com.modocs.feature.pdf
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
@@ -21,6 +22,17 @@ import java.io.ByteArrayOutputStream
  * - Zlib-compressed streams
  */
 object PdfTextExtractor {
+
+    private const val TAG = "PdfTextExtractor"
+
+    /**
+     * Largest PDF we will pull into memory for text extraction. See
+     * [readAtMost] for why this is far below the OOXML container cap.
+     */
+    private const val MAX_SOURCE_BYTES = 32L * 1024 * 1024 // 32 MB
+
+    /** Output cap for a single Flate-compressed content stream. */
+    private const val MAX_INFLATED_STREAM_BYTES = 64L * 1024 * 1024 // 64 MB
 
     /**
      * A positioned piece of text on a page.
@@ -46,15 +58,45 @@ object PdfTextExtractor {
     suspend fun extractText(context: Context, uri: Uri): List<PageText> =
         withContext(Dispatchers.IO) {
             try {
-                val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
-                    BufferedInputStream(input).readBytes()
-                } ?: return@withContext emptyList()
+                val stream = context.contentResolver.openInputStream(uri)
+                    ?: return@withContext emptyList()
+                val bytes = stream.use { BufferedInputStream(it).readAtMost(MAX_SOURCE_BYTES) }
+
+                if (bytes == null) {
+                    // Too large to parse safely. Text search is unavailable for
+                    // this document, but viewing and rendering are unaffected —
+                    // far better than an OOM on the way in.
+                    Log.i(TAG, "Skipping text extraction: PDF exceeds ${MAX_SOURCE_BYTES / (1024 * 1024)} MB")
+                    return@withContext emptyList()
+                }
 
                 extractTextFromBytes(bytes)
             } catch (_: Exception) {
                 emptyList()
             }
         }
+
+    /**
+     * Read the whole stream, or return null if it exceeds [limit].
+     *
+     * The extractor holds the file as a ByteArray *and* as an ISO-8859-1
+     * String. PDF bodies are full of bytes above 0x7F, so that String is two
+     * bytes per char and peak usage is roughly three times the file size —
+     * which is why the limit here is well below the OOXML one.
+     */
+    private fun java.io.InputStream.readAtMost(limit: Long): ByteArray? {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val read = read(buffer)
+            if (read == -1) break
+            total += read
+            if (total > limit) return null
+            out.write(buffer, 0, read)
+        }
+        return out.toByteArray()
+    }
 
     private fun extractTextFromBytes(bytes: ByteArray): List<PageText> {
         val content = String(bytes, Charsets.ISO_8859_1)
@@ -331,12 +373,21 @@ object PdfTextExtractor {
             inflater.setInput(bytes)
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(4096)
-            while (!inflater.finished()) {
-                val count = inflater.inflate(buffer)
-                if (count == 0 && inflater.needsInput()) break
-                output.write(buffer, 0, count)
+            var total = 0L
+            try {
+                while (!inflater.finished()) {
+                    val count = inflater.inflate(buffer)
+                    if (count == 0 && inflater.needsInput()) break
+                    total += count
+                    // A content stream that inflates past this is a decompression
+                    // bomb, not a page of text. Give up on this stream rather
+                    // than growing the buffer until the process dies.
+                    if (total > MAX_INFLATED_STREAM_BYTES) return null
+                    output.write(buffer, 0, count)
+                }
+            } finally {
+                inflater.end()
             }
-            inflater.end()
             String(output.toByteArray(), Charsets.ISO_8859_1)
         } catch (_: Exception) {
             null

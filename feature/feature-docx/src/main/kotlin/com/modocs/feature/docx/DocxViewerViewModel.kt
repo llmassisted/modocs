@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.modocs.core.common.OoxmlDecryptor
+import com.modocs.core.common.documentErrorMessage
 import javax.inject.Inject
 
 enum class DocxViewMode { CANVAS, COMPOSE }
@@ -36,6 +38,12 @@ data class DocxViewerState(
     val formattingVersion: Int = 0,
     val isPasswordRequired: Boolean = false,
     val passwordError: String? = null,
+    /**
+     * True once the document has been opened by decrypting it. The in-memory
+     * document is plaintext, so writing it back over the original would quietly
+     * strip the user's password protection.
+     */
+    val wasPasswordProtected: Boolean = false,
 )
 
 data class DocxSearchState(
@@ -138,23 +146,26 @@ class DocxViewerViewModel @Inject constructor(
                 ?: resolveFileName(uri)
                 ?: "Document"
 
-            // Check if file is password-protected (OLE2 container)
-            if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    isPasswordRequired = true,
-                    fileName = name,
-                )
-                return@launch
-            }
-
             try {
+                // Check if file is password-protected (OLE2 container)
+                if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        isPasswordRequired = true,
+                        fileName = name,
+                    )
+                    return@launch
+                }
+
                 val document = DocxParser.parse(context, uri)
                 onDocumentLoaded(document, name)
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    errorMessage = "Failed to open document: ${e.message ?: "Unknown error"}",
+                    fileName = name,
+                    errorMessage = "Failed to open document: ${documentErrorMessage(t)}",
                 )
             }
         }
@@ -173,13 +184,16 @@ class DocxViewerViewModel @Inject constructor(
                         _state.value = _state.value.copy(
                             isPasswordRequired = false,
                             passwordError = null,
+                            wasPasswordProtected = true,
                         )
                         onDocumentLoaded(document, _state.value.fileName)
-                    } catch (e: Exception) {
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
                         _state.value = _state.value.copy(
                             isLoading = false,
                             isPasswordRequired = false,
-                            errorMessage = "Failed to open document: ${e.message ?: "Unknown error"}",
+                            errorMessage = "Failed to open document: ${documentErrorMessage(t)}",
                         )
                     }
                 }
@@ -511,9 +525,17 @@ class DocxViewerViewModel @Inject constructor(
         return highlights
     }
 
+    /**
+     * Whether the occurrence starting at [charOffset] is the current match.
+     *
+     * The page index alone is not enough — every match on the page would render
+     * as current. In CANVAS mode [searchCanvasMode] records `range` as a
+     * page-local offset produced by the same left-to-right scan used in
+     * [getHighlightsForPage], so the start offsets are directly comparable.
+     */
     private fun isCurrentMatchOnPage(pageIndex: Int, charOffset: Int, search: DocxSearchState): Boolean {
         val currentMatch = search.currentMatch ?: return false
-        return currentMatch.pageIndex == pageIndex
+        return currentMatch.pageIndex == pageIndex && currentMatch.range.first == charOffset
     }
 
     // --- Editing ---
@@ -699,6 +721,19 @@ class DocxViewerViewModel @Inject constructor(
         val uri = documentUri ?: return
 
         viewModelScope.launch {
+            // Writing the decrypted document back over the original would remove
+            // its password with no warning — a confidentiality regression the
+            // user never asked for. Make them choose a destination instead.
+            if (_state.value.wasPasswordProtected) {
+                _events.emit(
+                    DocxEvent.SaveError(
+                        "This document is password-protected. Saving over it would " +
+                            "remove the password — use Save As to write an unprotected copy."
+                    )
+                )
+                return@launch
+            }
+
             _state.value = _state.value.copy(isSaving = true)
             try {
                 DocxWriter.save(context, document, uri)
@@ -719,7 +754,15 @@ class DocxViewerViewModel @Inject constructor(
             try {
                 DocxWriter.save(context, document, outputUri)
                 _state.value = _state.value.copy(isDirty = false, isSaving = false)
-                _events.emit(DocxEvent.SaveSuccess("Document saved"))
+                _events.emit(
+                    DocxEvent.SaveSuccess(
+                        if (_state.value.wasPasswordProtected) {
+                            "Saved — note this copy is not password-protected"
+                        } else {
+                            "Document saved"
+                        }
+                    )
+                )
             } catch (e: Exception) {
                 _state.value = _state.value.copy(isSaving = false)
                 _events.emit(DocxEvent.SaveError("Save failed: ${e.message ?: "Unknown error"}"))

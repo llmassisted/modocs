@@ -118,17 +118,36 @@ class PdfRendererWrapper private constructor(
          */
         suspend fun open(context: Context, uri: Uri): PdfOpenResult {
             return withContext(Dispatchers.IO) {
-                try {
-                    val fd = context.contentResolver.openFileDescriptor(uri, "r")
+                // Both calls below can raise SecurityException but they mean
+                // completely different things, so they are opened separately:
+                // the resolver throws when the URI grant is gone, while
+                // AndroidPdfRenderer throws when the document is encrypted.
+                val fd = try {
+                    context.contentResolver.openFileDescriptor(uri, "r")
                         ?: return@withContext PdfOpenResult.Failed("Cannot open file")
-                    val renderer = AndroidPdfRenderer(fd)
-                    PdfOpenResult.Success(PdfRendererWrapper(fd, renderer))
                 } catch (_: SecurityException) {
+                    return@withContext PdfOpenResult.Failed(
+                        "No longer have permission to read this file. " +
+                            "Open it again from the app or folder it came from."
+                    )
+                } catch (e: Exception) {
+                    return@withContext PdfOpenResult.Failed(e.message ?: "Cannot open file")
+                }
+
+                try {
+                    PdfOpenResult.Success(PdfRendererWrapper(fd, AndroidPdfRenderer(fd)))
+                } catch (_: SecurityException) {
+                    fd.closeQuietly()
                     PdfOpenResult.PasswordRequired
                 } catch (e: Exception) {
+                    fd.closeQuietly()
                     PdfOpenResult.Failed(e.message ?: "Failed to open PDF")
                 }
             }
+        }
+
+        private fun ParcelFileDescriptor.closeQuietly() {
+            try { close() } catch (_: Exception) {}
         }
 
         /**
@@ -136,11 +155,16 @@ class PdfRendererWrapper private constructor(
          */
         suspend fun openFile(file: java.io.File): PdfOpenResult {
             return withContext(Dispatchers.IO) {
-                try {
-                    val fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-                    val renderer = AndroidPdfRenderer(fd)
-                    PdfOpenResult.Success(PdfRendererWrapper(fd, renderer))
+                val fd = try {
+                    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
                 } catch (e: Exception) {
+                    return@withContext PdfOpenResult.Failed(e.message ?: "Cannot open file")
+                }
+
+                try {
+                    PdfOpenResult.Success(PdfRendererWrapper(fd, AndroidPdfRenderer(fd)))
+                } catch (e: Exception) {
+                    fd.closeQuietly()
                     PdfOpenResult.Failed(e.message ?: "Failed to open PDF")
                 }
             }

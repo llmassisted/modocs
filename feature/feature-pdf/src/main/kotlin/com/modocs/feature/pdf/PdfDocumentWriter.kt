@@ -14,6 +14,7 @@ import android.os.ParcelFileDescriptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.sqrt
 
 /**
  * Writes a filled/signed PDF by rendering each page bitmap
@@ -24,6 +25,47 @@ import java.io.File
  * recycles bitmaps immediately to avoid OOM on large documents.
  */
 object PdfDocumentWriter {
+
+    /** Longest edge we will rasterise, in pixels. */
+    private const val MAX_RENDER_EDGE = 4000L
+
+    /**
+     * Total pixel budget for a single page. ARGB_8888 is 4 bytes per pixel, so
+     * this is roughly a 48 MB allocation — comfortably above A4/Letter at
+     * 300 DPI (~8.7 MP) but far below what an extreme page can ask for.
+     */
+    private const val MAX_RENDER_PIXELS = 12_000_000L
+
+    /**
+     * Pick a render size for a page, at 300 DPI where that fits in budget.
+     *
+     * Capping width alone left an extreme-aspect-ratio page — a long banner, a
+     * spliced scan, both perfectly valid PDFs — free to demand a
+     * multi-hundred-megabyte bitmap and take the process down, so the longest
+     * edge and the total area are both clamped, preserving aspect ratio.
+     */
+    private fun renderSizeFor(pageWidth: Int, pageHeight: Int): Pair<Int, Int> {
+        if (pageWidth <= 0 || pageHeight <= 0) return 1 to 1
+
+        // Native PDF coordinates are 72 DPI points.
+        var w = pageWidth.toLong() * 300 / 72
+        var h = pageHeight.toLong() * 300 / 72
+        if (w <= 0 || h <= 0) return 1 to 1
+
+        val longest = maxOf(w, h)
+        if (longest > MAX_RENDER_EDGE) {
+            w = w * MAX_RENDER_EDGE / longest
+            h = h * MAX_RENDER_EDGE / longest
+        }
+
+        if (w * h > MAX_RENDER_PIXELS) {
+            val scale = sqrt(MAX_RENDER_PIXELS.toDouble() / (w.toDouble() * h.toDouble()))
+            w = (w * scale).toLong()
+            h = (h * scale).toLong()
+        }
+
+        return w.coerceAtLeast(1).toInt() to h.coerceAtLeast(1).toInt()
+    }
 
     suspend fun save(
         context: Context,
@@ -44,9 +86,7 @@ object PdfDocumentWriter {
                 val pageWidth = srcPage.width
                 val pageHeight = srcPage.height
 
-                // Render at 300 DPI (native PDF coords are 72 DPI points)
-                val renderW = (pageWidth * 300 / 72).coerceAtMost(4000)
-                val renderH = (pageHeight.toLong() * renderW / pageWidth).toInt()
+                val (renderW, renderH) = renderSizeFor(pageWidth, pageHeight)
 
                 val bitmap = Bitmap.createBitmap(renderW, renderH, Bitmap.Config.ARGB_8888)
                 bitmap.eraseColor(Color.WHITE)

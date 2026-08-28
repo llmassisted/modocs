@@ -85,13 +85,21 @@ object Routes {
         return "pptx_viewer?uri=$encoded&name=$name"
     }
 
-    fun viewerForType(uri: Uri, documentType: DocumentType, displayName: String? = null): String {
+    /**
+     * Route to the viewer for [documentType], or null when there is no viewer.
+     *
+     * Returning null rather than guessing is deliberate: this used to fall back
+     * to the PDF viewer, so an unrecognised file opened as a garbled PDF. The
+     * `when` is exhaustive on purpose too — adding a document type should be a
+     * compile error here, not a silent fallback.
+     */
+    fun viewerForType(uri: Uri, documentType: DocumentType, displayName: String? = null): String? {
         return when (documentType) {
             DocumentType.PDF -> pdfViewer(uri, displayName)
             DocumentType.DOCX -> docxViewer(uri, displayName)
             DocumentType.XLSX -> xlsxViewer(uri, displayName)
             DocumentType.PPTX -> pptxViewer(uri, displayName)
-            else -> pdfViewer(uri, displayName) // fallback
+            DocumentType.UNKNOWN -> null
         }
     }
 }
@@ -137,13 +145,13 @@ fun MoDocsApp(
     LaunchedEffect(documentRequest?.token) {
         val request = documentRequest ?: return@LaunchedEffect
 
-        if (request.type == DocumentType.UNKNOWN) {
-            // Don't guess a viewer for an unrecognized file — tell the user instead.
+        // Don't guess a viewer for an unrecognized file — tell the user instead.
+        val route = Routes.viewerForType(request.uri, request.type) ?: run {
             Toast.makeText(context, "Unsupported file type", Toast.LENGTH_LONG).show()
             return@LaunchedEffect
         }
 
-        navController.navigate(Routes.viewerForType(request.uri, request.type)) {
+        navController.navigate(route) {
             // Externally-opened documents replace the whole back stack so Back exits
             // the app (matches the "open as a separate app" behaviour).
             popUpTo(navController.graph.startDestinationId) { inclusive = true }
@@ -173,7 +181,11 @@ fun MoDocsApp(
             ) {
                 HomeScreen(
                     onDocumentOpened = { uri, documentType, displayName ->
-                        navController.navigate(Routes.viewerForType(uri, documentType, displayName))
+                        // HomeViewModel already surfaces "Unsupported file format"
+                        // before emitting, so an unviewable type just goes nowhere.
+                        Routes.viewerForType(uri, documentType, displayName)?.let {
+                            navController.navigate(it)
+                        }
                     },
                 )
             }

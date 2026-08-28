@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup rules for Android 11 and below.
+
+  The recents database holds document display names and content URIs. Names are
+  private to the user, and the URIs are useless off-device anyway: the
+  permission grants behind them do not survive a restore, so a restored recents
+  list would be a list of names the user did not choose to upload pointing at
+  documents the app cannot open.
+
+  Keep in sync with data_extraction_rules.xml and with the database name in
+  StorageModule.
+-->
+<full-backup-content>
+    <exclude domain="database" path="modocs.db" />
+    <exclude domain="database" path="modocs.db-shm" />
+    <exclude domain="database" path="modocs.db-wal" />
+</full-backup-content>

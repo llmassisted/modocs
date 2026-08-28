@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.modocs.core.common.OoxmlDecryptor
+import com.modocs.core.common.documentErrorMessage
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 
 data class XlsxViewerState(
@@ -32,6 +34,12 @@ data class XlsxViewerState(
     val editingCell: Pair<Int, Int>? = null,
     val isPasswordRequired: Boolean = false,
     val passwordError: String? = null,
+    /**
+     * True once the workbook has been opened by decrypting it. The in-memory
+     * document is plaintext, so writing it back over the original would quietly
+     * strip the user's password protection.
+     */
+    val wasPasswordProtected: Boolean = false,
 )
 
 data class XlsxSearchState(
@@ -87,27 +95,30 @@ class XlsxViewerViewModel @Inject constructor(
 
             val name = displayName ?: resolveFileName(uri) ?: "Spreadsheet"
 
-            // Check if file is password-protected (OLE2 container)
-            if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    isPasswordRequired = true,
-                    fileName = name,
-                )
-                return@launch
-            }
-
             try {
+                // Check if file is password-protected (OLE2 container)
+                if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        isPasswordRequired = true,
+                        fileName = name,
+                    )
+                    return@launch
+                }
+
                 val document = XlsxParser.parse(context, uri)
                 _state.value = _state.value.copy(
                     isLoading = false,
                     fileName = name,
                     document = document,
                 )
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    errorMessage = "Failed to open spreadsheet: ${e.message ?: "Unknown error"}",
+                    fileName = name,
+                    errorMessage = "Failed to open spreadsheet: ${documentErrorMessage(t)}",
                 )
             }
         }
@@ -128,12 +139,15 @@ class XlsxViewerViewModel @Inject constructor(
                             isPasswordRequired = false,
                             passwordError = null,
                             document = document,
+                            wasPasswordProtected = true,
                         )
-                    } catch (e: Exception) {
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
                         _state.value = _state.value.copy(
                             isLoading = false,
                             isPasswordRequired = false,
-                            errorMessage = "Failed to open spreadsheet: ${e.message ?: "Unknown error"}",
+                            errorMessage = "Failed to open spreadsheet: ${documentErrorMessage(t)}",
                         )
                     }
                 }
@@ -329,6 +343,19 @@ class XlsxViewerViewModel @Inject constructor(
         val uri = documentUri ?: return
 
         viewModelScope.launch {
+            // Writing the decrypted document back over the original would remove
+            // its password with no warning — a confidentiality regression the
+            // user never asked for. Make them choose a destination instead.
+            if (_state.value.wasPasswordProtected) {
+                _events.emit(
+                    XlsxEvent.SaveError(
+                        "This spreadsheet is password-protected. Saving over it would " +
+                            "remove the password — use Save As to write an unprotected copy."
+                    )
+                )
+                return@launch
+            }
+
             _state.value = _state.value.copy(isSaving = true)
             try {
                 XlsxWriter.save(context, document, uri)
@@ -349,7 +376,15 @@ class XlsxViewerViewModel @Inject constructor(
             try {
                 XlsxWriter.save(context, document, outputUri)
                 _state.value = _state.value.copy(isDirty = false, isSaving = false)
-                _events.emit(XlsxEvent.SaveSuccess("Spreadsheet saved"))
+                _events.emit(
+                    XlsxEvent.SaveSuccess(
+                        if (_state.value.wasPasswordProtected) {
+                            "Saved — note this copy is not password-protected"
+                        } else {
+                            "Spreadsheet saved"
+                        }
+                    )
+                )
             } catch (e: Exception) {
                 _state.value = _state.value.copy(isSaving = false)
                 _events.emit(XlsxEvent.SaveError("Save failed: ${e.message ?: "Unknown error"}"))

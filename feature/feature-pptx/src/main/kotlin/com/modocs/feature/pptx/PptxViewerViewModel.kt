@@ -22,6 +22,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -34,6 +35,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import com.modocs.core.common.OoxmlDecryptor
+import com.modocs.core.common.documentErrorMessage
 import javax.inject.Inject
 
 data class PptxViewerState(
@@ -101,17 +103,17 @@ class PptxViewerViewModel @Inject constructor(
 
             val name = displayName ?: resolveFileName(uri) ?: "Presentation"
 
-            // Check if file is password-protected (OLE2 container)
-            if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    isPasswordRequired = true,
-                    fileName = name,
-                )
-                return@launch
-            }
-
             try {
+                // Check if file is password-protected (OLE2 container)
+                if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        isPasswordRequired = true,
+                        fileName = name,
+                    )
+                    return@launch
+                }
+
                 val document = PptxParser.parse(context, uri)
                 _state.value = _state.value.copy(
                     isLoading = false,
@@ -119,10 +121,13 @@ class PptxViewerViewModel @Inject constructor(
                     document = document,
                     slideCount = document.slides.size,
                 )
-            } catch (e: Exception) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    errorMessage = "Failed to open presentation: ${e.message ?: "Unknown error"}",
+                    fileName = name,
+                    errorMessage = "Failed to open presentation: ${documentErrorMessage(t)}",
                 )
             }
         }
@@ -145,11 +150,13 @@ class PptxViewerViewModel @Inject constructor(
                             document = document,
                             slideCount = document.slides.size,
                         )
-                    } catch (e: Exception) {
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
                         _state.value = _state.value.copy(
                             isLoading = false,
                             isPasswordRequired = false,
-                            errorMessage = "Failed to open presentation: ${e.message ?: "Unknown error"}",
+                            errorMessage = "Failed to open presentation: ${documentErrorMessage(t)}",
                         )
                     }
                 }

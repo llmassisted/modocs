@@ -5,10 +5,10 @@ import android.graphics.Color as AndroidColor
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.modocs.core.common.createXmlParser
 import com.modocs.core.common.readZipEntriesCapped
+import com.modocs.core.common.tolerateParse
 import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
-import java.io.ByteArrayInputStream
 import java.io.InputStream
 import kotlin.math.roundToInt
 
@@ -46,11 +46,14 @@ object PptxParser {
         // Step 1: Read all ZIP entries (size-capped against zip bombs)
         val entries = readZipEntriesCapped(inputStream)
 
-        // Step 2: Parse theme colors
-        val themeColors = parseThemeColors(entries)
-
-        // Step 3: Parse presentation relationships
-        val presRels = parseRelationships(entries["ppt/_rels/presentation.xml.rels"])
+        // Steps 2-3: theme and relationships are optional — losing them costs
+        // colours or images, not the deck.
+        val themeColors = tolerate("theme colors", emptyMap<String, Int>()) {
+            parseThemeColors(entries)
+        }
+        val presRels = tolerate("presentation relationships", emptyMap<String, String>()) {
+            parseRelationships(entries["ppt/_rels/presentation.xml.rels"])
+        }
 
         // Step 4: Parse presentation.xml (slide size + slide order)
         val presBytes = entries["ppt/presentation.xml"]
@@ -59,91 +62,94 @@ object PptxParser {
 
         // Step 5: Parse each slide
         val slides = presInfo.slideRIds.mapIndexedNotNull { index, rId ->
-            val target = presRels[rId] ?: return@mapIndexedNotNull null
-            val slidePath = if (target.startsWith("/")) target.removePrefix("/")
-            else "ppt/$target"
-            val slideBytes = entries[slidePath] ?: return@mapIndexedNotNull null
+            // One unparseable slide should cost that slide, not the deck.
+            tolerate<PptxSlide?>("slide ${index + 1}", null) {
+                val target = presRels[rId] ?: return@mapIndexedNotNull null
+                val slidePath = if (target.startsWith("/")) target.removePrefix("/")
+                else "ppt/$target"
+                val slideBytes = entries[slidePath] ?: return@mapIndexedNotNull null
 
-            // Parse per-slide relationships (for images + layout reference)
-            val slideFileName = slidePath.substringAfterLast("/")
-            val slideRelsPath = slidePath.replace(slideFileName, "_rels/$slideFileName.rels")
-            val slideRels = parseRelationships(entries[slideRelsPath])
-            val slideRelsTyped = parseRelationshipsWithType(entries[slideRelsPath])
+                // Parse per-slide relationships (for images + layout reference)
+                val slideFileName = slidePath.substringAfterLast("/")
+                val slideRelsPath = slidePath.replace(slideFileName, "_rels/$slideFileName.rels")
+                val slideRels = parseRelationships(entries[slideRelsPath])
+                val slideRelsTyped = parseRelationshipsWithType(entries[slideRelsPath])
 
-            // Resolve images
-            val images = mutableMapOf<String, ByteArray>()
-            for ((relId, relTarget) in slideRels) {
-                val imagePath = if (relTarget.startsWith("/")) relTarget.removePrefix("/")
-                else {
+                // Resolve images
+                val images = mutableMapOf<String, ByteArray>()
+                for ((relId, relTarget) in slideRels) {
+                    val imagePath = if (relTarget.startsWith("/")) relTarget.removePrefix("/")
+                    else {
+                        val slideDir = slidePath.substringBeforeLast("/")
+                        "$slideDir/$relTarget".replace("/./", "/")
+                    }
+                    val normalizedPath = normalizePath(imagePath)
+                    entries[normalizedPath]?.let { images[relId] = it }
+                }
+
+                // Resolve layout path
+                val layoutRelInfo = slideRelsTyped.values.firstOrNull { it.type == REL_TYPE_SLIDE_LAYOUT }
+                val layoutPath = layoutRelInfo?.let { rel ->
                     val slideDir = slidePath.substringBeforeLast("/")
-                    "$slideDir/$relTarget".replace("/./", "/")
-                }
-                val normalizedPath = normalizePath(imagePath)
-                entries[normalizedPath]?.let { images[relId] = it }
-            }
-
-            // Resolve layout path
-            val layoutRelInfo = slideRelsTyped.values.firstOrNull { it.type == REL_TYPE_SLIDE_LAYOUT }
-            val layoutPath = layoutRelInfo?.let { rel ->
-                val slideDir = slidePath.substringBeforeLast("/")
-                if (rel.target.startsWith("/")) rel.target.removePrefix("/")
-                else normalizePath("$slideDir/${rel.target}")
-            }
-
-            // Resolve master path from layout rels
-            var masterPath: String? = null
-            if (layoutPath != null) {
-                val layoutFileName = layoutPath.substringAfterLast("/")
-                val layoutRelsPath = layoutPath.replace(layoutFileName, "_rels/$layoutFileName.rels")
-                val layoutRelsTyped = parseRelationshipsWithType(entries[layoutRelsPath])
-                val masterRel = layoutRelsTyped.values.firstOrNull { it.type == REL_TYPE_SLIDE_MASTER }
-                masterPath = masterRel?.let { rel ->
-                    val layoutDir = layoutPath.substringBeforeLast("/")
                     if (rel.target.startsWith("/")) rel.target.removePrefix("/")
-                    else normalizePath("$layoutDir/${rel.target}")
+                    else normalizePath("$slideDir/${rel.target}")
                 }
+
+                // Resolve master path from layout rels
+                var masterPath: String? = null
+                if (layoutPath != null) {
+                    val layoutFileName = layoutPath.substringAfterLast("/")
+                    val layoutRelsPath = layoutPath.replace(layoutFileName, "_rels/$layoutFileName.rels")
+                    val layoutRelsTyped = parseRelationshipsWithType(entries[layoutRelsPath])
+                    val masterRel = layoutRelsTyped.values.firstOrNull { it.type == REL_TYPE_SLIDE_MASTER }
+                    masterPath = masterRel?.let { rel ->
+                        val layoutDir = layoutPath.substringBeforeLast("/")
+                        if (rel.target.startsWith("/")) rel.target.removePrefix("/")
+                        else normalizePath("$layoutDir/${rel.target}")
+                    }
+                }
+
+                // Parse master layout info (placeholders + decorative shapes)
+                val masterInfo = if (masterPath != null) {
+                    entries[masterPath]?.let { parseLayoutInfo(it, themeColors) }
+                } else null
+
+                // Parse slide layout info (placeholders + decorative shapes)
+                val layoutInfo = if (layoutPath != null) {
+                    entries[layoutPath]?.let { parseLayoutInfo(it, themeColors) }
+                } else null
+
+                // Merge placeholders: layout overrides master
+                val masterPlaceholders = masterInfo?.placeholders ?: emptyList()
+                val layoutPlaceholders = layoutInfo?.placeholders ?: emptyList()
+                val mergedPlaceholders = mergePlaceholders(masterPlaceholders, layoutPlaceholders)
+
+                // Collect background shapes: master shapes first, then layout shapes
+                val bgShapes = mutableListOf<PptxShape>()
+                masterInfo?.decorativeShapes?.let { bgShapes.addAll(it) }
+                layoutInfo?.decorativeShapes?.let { bgShapes.addAll(it) }
+
+                // Resolve background color from master -> layout -> slide chain
+                var bgColor: Int? = null
+                if (masterPath != null) {
+                    entries[masterPath]?.let { extractBackgroundColor(it, themeColors)?.let { c -> bgColor = c } }
+                }
+                if (layoutPath != null) {
+                    entries[layoutPath]?.let { extractBackgroundColor(it, themeColors)?.let { c -> bgColor = c } }
+                }
+
+                parseSlide(
+                    slideNumber = index + 1,
+                    bytes = slideBytes,
+                    images = images,
+                    themeColors = themeColors,
+                    inheritedBgColor = bgColor,
+                    layoutPlaceholders = mergedPlaceholders,
+                    backgroundShapes = bgShapes,
+                    slideWidth = presInfo.slideWidth,
+                    slideHeight = presInfo.slideHeight,
+                )
             }
-
-            // Parse master layout info (placeholders + decorative shapes)
-            val masterInfo = if (masterPath != null) {
-                entries[masterPath]?.let { parseLayoutInfo(it, themeColors) }
-            } else null
-
-            // Parse slide layout info (placeholders + decorative shapes)
-            val layoutInfo = if (layoutPath != null) {
-                entries[layoutPath]?.let { parseLayoutInfo(it, themeColors) }
-            } else null
-
-            // Merge placeholders: layout overrides master
-            val masterPlaceholders = masterInfo?.placeholders ?: emptyList()
-            val layoutPlaceholders = layoutInfo?.placeholders ?: emptyList()
-            val mergedPlaceholders = mergePlaceholders(masterPlaceholders, layoutPlaceholders)
-
-            // Collect background shapes: master shapes first, then layout shapes
-            val bgShapes = mutableListOf<PptxShape>()
-            masterInfo?.decorativeShapes?.let { bgShapes.addAll(it) }
-            layoutInfo?.decorativeShapes?.let { bgShapes.addAll(it) }
-
-            // Resolve background color from master -> layout -> slide chain
-            var bgColor: Int? = null
-            if (masterPath != null) {
-                entries[masterPath]?.let { extractBackgroundColor(it, themeColors)?.let { c -> bgColor = c } }
-            }
-            if (layoutPath != null) {
-                entries[layoutPath]?.let { extractBackgroundColor(it, themeColors)?.let { c -> bgColor = c } }
-            }
-
-            parseSlide(
-                slideNumber = index + 1,
-                bytes = slideBytes,
-                images = images,
-                themeColors = themeColors,
-                inheritedBgColor = bgColor,
-                layoutPlaceholders = mergedPlaceholders,
-                backgroundShapes = bgShapes,
-                slideWidth = presInfo.slideWidth,
-                slideHeight = presInfo.slideHeight,
-            )
         }
 
         return PptxDocument(
@@ -1592,11 +1598,8 @@ object PptxParser {
         return result.joinToString("/")
     }
 
-    private fun createParser(bytes: ByteArray): XmlPullParser {
-        val factory = XmlPullParserFactory.newInstance()
-        factory.isNamespaceAware = true
-        val parser = factory.newPullParser()
-        parser.setInput(ByteArrayInputStream(bytes), "UTF-8")
-        return parser
-    }
+    private fun createParser(bytes: ByteArray): XmlPullParser = createXmlParser(bytes)
+
+    private inline fun <T> tolerate(what: String, fallback: T, block: () -> T): T =
+        tolerateParse("PptxParser", what, fallback, block)
 }

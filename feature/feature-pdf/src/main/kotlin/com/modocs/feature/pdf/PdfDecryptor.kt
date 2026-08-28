@@ -3,8 +3,10 @@ package com.modocs.feature.pdf
 import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import com.modocs.core.common.DECRYPTED_TEMP_PREFIX
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -35,15 +37,19 @@ object PdfDecryptor {
             try {
                 val document = PDDocument.load(inputStream, password)
 
-                val tempFile = File(context.cacheDir, "decrypted_${System.nanoTime()}.pdf")
+                val tempFile = File(context.cacheDir, "$DECRYPTED_TEMP_PREFIX${System.nanoTime()}.pdf")
                 document.isAllSecurityToBeRemoved = true
                 document.save(tempFile)
                 document.close()
 
                 DecryptResult.Success(tempFile)
-            } catch (_: IOException) {
-                // PDFBox throws IOException with message containing "password" for wrong passwords
+            } catch (_: InvalidPasswordException) {
                 DecryptResult.WrongPassword
+            } catch (e: IOException) {
+                // A truncated or otherwise corrupt file also surfaces as IOException.
+                // Reporting it as a wrong password would trap the user on the
+                // password dialog with no correct answer, so it is a real failure.
+                DecryptResult.Failed(e.message ?: "This PDF appears to be damaged")
             } catch (e: Exception) {
                 DecryptResult.Failed(e.message ?: "Decryption failed")
             } finally {

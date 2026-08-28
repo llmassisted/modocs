@@ -29,8 +29,8 @@ android {
         applicationId = "com.modocs.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 173
-        versionName = "1.73"
+        versionCode = 174
+        versionName = "1.74"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
