@@ -11,21 +11,16 @@ import android.provider.OpenableColumns
  */
 const val MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024
 
-enum class DocumentType(val displayName: String) {
-    PDF("PDF"),
-    DOCX("Word Document"),
-    XLSX("Excel Spreadsheet"),
-    PPTX("PowerPoint Presentation"),
-    UNKNOWN("Unknown");
+enum class DocumentType(val displayName: String, val mimeType: String) {
+    PDF("PDF", "application/pdf"),
+    DOCX("Word Document", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    XLSX("Excel Spreadsheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    PPTX("PowerPoint Presentation", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+    UNKNOWN("Unknown", "application/octet-stream");
 
     companion object {
-        fun fromMimeType(mimeType: String?): DocumentType = when (mimeType) {
-            "application/pdf" -> PDF
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> DOCX
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> XLSX
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> PPTX
-            else -> UNKNOWN
-        }
+        fun fromMimeType(mimeType: String?): DocumentType =
+            entries.firstOrNull { it != UNKNOWN && it.mimeType == mimeType } ?: UNKNOWN
 
         fun fromFileName(name: String): DocumentType {
             val ext = name.substringAfterLast('.', "").lowercase()

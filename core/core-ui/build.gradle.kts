@@ -27,7 +27,11 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:core-common"))
     implementation(project(":fonts"))
+
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.android)
 
     implementation(platform(libs.compose.bom))
     api(libs.compose.ui)

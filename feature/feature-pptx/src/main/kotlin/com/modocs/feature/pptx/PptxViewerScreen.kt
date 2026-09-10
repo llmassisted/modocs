@@ -62,6 +62,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.modocs.core.ui.components.ErrorMessage
 import com.modocs.core.ui.components.LoadingIndicator
+import com.modocs.core.ui.components.ShareDocumentAction
 
 // Fixed slide canvas background — neutral gray, not affected by dark/light theme
 private val SlideCanvasBackground = Color(0xFFE0E0E0)
@@ -113,6 +114,10 @@ fun PptxViewerScreen(
                         IconButton(onClick = { viewModel.toggleSearch() }) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
+                        ShareDocumentAction(
+                            uri = uri,
+                            displayName = state.fileName.ifEmpty { null } ?: displayName,
+                        )
                     },
                     scrollBehavior = scrollBehavior,
                 )

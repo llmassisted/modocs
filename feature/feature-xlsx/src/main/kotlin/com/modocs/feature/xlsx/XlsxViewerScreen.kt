@@ -79,6 +79,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.modocs.core.ui.components.ErrorMessage
 import com.modocs.core.ui.components.LoadingIndicator
+import com.modocs.core.ui.components.ShareDocumentAction
 
 private val HighlightYellow = Color(0x66FFEB3B)
 private val HighlightOrange = Color(0x99FF9800)
@@ -186,6 +187,10 @@ fun XlsxViewerScreen(
                                 )
                             }
                         }
+                        ShareDocumentAction(
+                            uri = uri,
+                            displayName = state.fileName.ifEmpty { null } ?: displayName,
+                        )
                     },
                     scrollBehavior = scrollBehavior,
                 )

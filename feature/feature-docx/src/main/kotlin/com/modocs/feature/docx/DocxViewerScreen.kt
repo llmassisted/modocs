@@ -10,6 +10,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import com.modocs.core.ui.components.ShareDocumentAction
 import com.modocs.core.ui.components.ZoomableContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -253,6 +254,11 @@ fun DocxViewerScreen(
                             contentDescription = if (searchState.isSearchActive) "Close search" else "Search in document",
                         )
                     }
+
+                    ShareDocumentAction(
+                        uri = uri,
+                        displayName = state.fileName.ifEmpty { null } ?: displayName,
+                    )
                 },
                 scrollBehavior = scrollBehavior,
             )

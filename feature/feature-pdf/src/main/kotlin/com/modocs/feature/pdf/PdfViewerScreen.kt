@@ -14,6 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import com.modocs.core.ui.components.ShareDocumentAction
 import com.modocs.core.ui.components.ZoomableContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -216,6 +217,10 @@ fun PdfViewerScreen(
                             tint = if (fillSignState.isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                         )
                     }
+                    ShareDocumentAction(
+                        uri = uri,
+                        displayName = state.fileName.ifEmpty { null } ?: displayName,
+                    )
                 },
                 scrollBehavior = scrollBehavior,
             )
