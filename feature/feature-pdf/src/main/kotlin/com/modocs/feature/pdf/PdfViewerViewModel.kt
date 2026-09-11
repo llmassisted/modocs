@@ -53,6 +53,12 @@ data class PdfViewerState(
     val pageCount: Int = 0,
     val currentPage: Int = 0,
     val fileName: String = "",
+    val activeUri: Uri? = null,
+    val saveRevision: Int = 0,
+    val formFields: List<PdfFormField> = emptyList(),
+    val formValues: Map<String, String> = emptyMap(),
+    val formError: String? = null,
+    val formsLoading: Boolean = false,
     val errorMessage: String? = null,
     val isPasswordRequired: Boolean = false,
     val passwordError: String? = null,
@@ -112,6 +118,7 @@ class PdfViewerViewModel @Inject constructor(
         if (pdfRenderer != null) return
 
         documentUri = uri
+        _state.value = _state.value.copy(activeUri = uri)
         renderSourceUri = uri
 
         viewModelScope.launch {
@@ -383,6 +390,7 @@ class PdfViewerViewModel @Inject constructor(
     // --- Fill & Sign ---
 
     fun toggleFillSign() {
+        if (_fillSignState.value.isSaving) return
         val current = _fillSignState.value
         _fillSignState.value = current.copy(isActive = !current.isActive)
         // Close search when entering fill/sign mode
@@ -395,6 +403,7 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun selectTool(tool: FillSignTool) {
+        if (_fillSignState.value.isSaving) return
         val current = _fillSignState.value
         // Cancel any pending editing and deselect annotation
         _fillSignState.value = current.copy(
@@ -417,6 +426,7 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun onSignatureDrawn(strokes: List<List<Offset>>) {
+        if (_fillSignState.value.isSaving) return
         // Normalize strokes relative to pad canvas size — strokes come in pixel coords
         // They'll be re-normalized when placed on the page
         _fillSignState.value = _fillSignState.value.copy(
@@ -466,6 +476,7 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun onPageTap(pageIndex: Int, normalizedX: Float, normalizedY: Float, pageWidthPx: Float, pageHeightPx: Float) {
+        if (_fillSignState.value.isSaving) return
         val current = _fillSignState.value
         if (!current.isActive) return
 
@@ -578,10 +589,12 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun updateEditingText(text: String) {
+        if (_fillSignState.value.isSaving) return
         _fillSignState.value = _fillSignState.value.copy(editingText = text)
     }
 
     fun confirmTextEdit() {
+        if (_fillSignState.value.isSaving) return
         val current = _fillSignState.value
         val editId = current.editingAnnotationId ?: return
         val text = current.editingText.trim()
@@ -607,6 +620,7 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun cancelTextEdit() {
+        if (_fillSignState.value.isSaving) return
         val current = _fillSignState.value
         val editId = current.editingAnnotationId ?: return
         val ann = current.annotations.find { it.id == editId }
@@ -626,6 +640,7 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun deleteAnnotation(id: String) {
+        if (_fillSignState.value.isSaving) return
         val current = _fillSignState.value
         _fillSignState.value = current.copy(
             annotations = current.annotations.filter { it.id != id },
@@ -634,10 +649,12 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun selectAnnotation(id: String?) {
+        if (_fillSignState.value.isSaving) return
         _fillSignState.value = _fillSignState.value.copy(selectedAnnotationId = id)
     }
 
     fun moveAnnotation(id: String, newX: Float, newY: Float) {
+        if (_fillSignState.value.isSaving) return
         val current = _fillSignState.value
         _fillSignState.value = current.copy(
             annotations = current.annotations.map { ann ->
@@ -654,6 +671,7 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun changeAnnotationSize(id: String, delta: Float) {
+        if (_fillSignState.value.isSaving) return
         val current = _fillSignState.value
         _fillSignState.value = current.copy(
             annotations = current.annotations.map { ann ->
@@ -676,12 +694,13 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun undoLastAnnotation() {
+        if (_fillSignState.value.isSaving) return
         val current = _fillSignState.value
         if (current.annotations.isEmpty()) return
         _fillSignState.value = current.copy(
             annotations = current.annotations.dropLast(1),
             selectedAnnotationId = null,
-            isDirty = current.annotations.size > 1,
+            isDirty = true,
         )
     }
 
@@ -690,6 +709,11 @@ class PdfViewerViewModel @Inject constructor(
     }
 
     fun saveFilled(outputUri: Uri) {
+        if (_fillSignState.value.isSaving) return
+        if (outputUri == documentUri) {
+            viewModelScope.launch { _events.emit(PdfEvent.SaveError("Choose a new file to preserve the original")) }; return
+        }
+        if (_fillSignState.value.editingAnnotationId != null) confirmTextEdit()
         val srcUri = renderSourceUri ?: documentUri ?: return
         val pageCount = _state.value.pageCount
         val annotations = _fillSignState.value.annotations
@@ -703,16 +727,56 @@ class PdfViewerViewModel @Inject constructor(
                     outputUri = outputUri,
                     pageCount = pageCount,
                     annotations = annotations,
+                    formValues = _state.value.formValues,
                 )
                 _fillSignState.value = _fillSignState.value.copy(
                     isSaving = false,
                     isDirty = false,
                 )
-                _events.emit(PdfEvent.SaveSuccess("PDF saved successfully"))
+                _state.value = _state.value.copy(activeUri = outputUri,
+                    fileName = resolveFileName(outputUri) ?: _state.value.fileName,
+                    saveRevision = _state.value.saveRevision + 1)
+                _events.emit(PdfEvent.SaveSuccess(if (decryptedTempFile != null)
+                    "Saved copy — this copy is not password-protected" else "PDF copy saved"))
             } catch (e: Exception) {
                 _fillSignState.value = _fillSignState.value.copy(isSaving = false)
                 _events.emit(PdfEvent.SaveError("Failed to save: ${e.message ?: "Unknown error"}"))
             }
+        }
+    }
+
+    fun loadFormFields() {
+        if (_state.value.formsLoading || _state.value.formFields.isNotEmpty()) return
+        val source = renderSourceUri ?: return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(formsLoading = true, formError = null)
+            try {
+                val fields = PdfForms.read(context, source)
+                _state.value = _state.value.copy(formFields = fields, formsLoading = false,
+                    formError = if (fields.isEmpty()) "No supported form fields found. Use Fill & Sign to place text or marks." else null)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { _state.value = _state.value.copy(formsLoading = false, formError = "Could not load forms: ${e.message}") }
+        }
+    }
+
+    fun updateFormValue(name: String, value: String) {
+        if (_fillSignState.value.isSaving) return
+        _state.value = _state.value.copy(formValues = _state.value.formValues + (name to value))
+        _fillSignState.value = _fillSignState.value.copy(isDirty = true)
+    }
+
+    fun printDocument(activityContext: Context) {
+        if (_fillSignState.value.isSaving) return
+        confirmTextEdit()
+        viewModelScope.launch {
+            val copy = java.io.File.createTempFile("print_", ".pdf", context.cacheDir)
+            try {
+                val source = renderSourceUri ?: documentUri ?: error("No document open")
+                PdfDocumentWriter.save(context, source, Uri.fromFile(copy), _state.value.pageCount,
+                    _fillSignState.value.annotations, _state.value.formValues)
+                com.modocs.core.common.printPdf(activityContext, copy, _state.value.fileName)
+            } catch (e: kotlinx.coroutines.CancellationException) { copy.delete(); throw e }
+            catch (e: Exception) { copy.delete(); _events.emit(PdfEvent.SaveError("Could not print: ${e.message}")) }
         }
     }
 

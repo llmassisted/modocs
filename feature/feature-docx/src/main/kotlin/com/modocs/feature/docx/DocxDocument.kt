@@ -43,6 +43,10 @@ data class DocxDocument(
     val rawEntries: Map<String, ByteArray> = emptyMap(),
     /** Page size and margins from section properties. */
     val pageSetup: PageSetup = PageSetup(),
+    val originalBody: List<DocxElement> = body.toList(),
+    val headerParagraphs: List<DocxParagraph> = emptyList(),
+    val footerParagraphs: List<DocxParagraph> = emptyList(),
+    val warnings: List<String> = emptyList(),
 )
 
 // --- Elements ---
@@ -53,6 +57,9 @@ data class DocxParagraph(
     val runs: List<DocxRun>,
     val properties: ParagraphProperties = ParagraphProperties(),
     val listInfo: ListInfo? = null,
+    val listLabel: String? = null,
+    val sourceParagraph: Int = -1,
+    val safelyEditable: Boolean = false,
 ) : DocxElement {
     /** Plain text of all runs concatenated. */
     val text: String get() = runs.joinToString("") { it.text }
@@ -106,6 +113,7 @@ data class DocxImage(
 data class DocxRun(
     val text: String,
     val properties: RunProperties = RunProperties(),
+    val sourceRun: Int = -1,
 ) {
     /** Whether this run represents a line break. */
     val isBreak: Boolean get() = text == "\n"
@@ -217,6 +225,7 @@ data class NumberingLevel(
     val format: NumberFormat = NumberFormat.BULLET,
     val text: String = "•",
     val indentTwips: Int = 720,
+    val start: Int = 1,
 )
 
 enum class NumberFormat {

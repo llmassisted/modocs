@@ -205,7 +205,9 @@ fun MoDocsApp(
                     }
                 },
             ) {
-                PlaceholderScreen(title = "Recent Files")
+                HomeScreen(recentOnly = true, onDocumentOpened = { uri, type, name ->
+                    Routes.viewerForType(uri, type, name)?.let { navController.navigate(it) }
+                })
             }
         }
 

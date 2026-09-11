@@ -167,7 +167,7 @@ class DocxPageRenderer(private val context: Context) {
                 (prev.contextualSpacing || props.contextualSpacing) &&
                 prev.styleId != null && prev.styleId == props.styleId
         if (!suppressSpacing) state.yPos += props.spacingBeforePt
-        val listPrefix = layout.buildListPrefix(paragraph.listInfo, document.numbering)
+        val listPrefix = paragraph.listLabel ?: layout.buildListPrefix(paragraph.listInfo, document.numbering)
         val indent = props.indentLeftTwips / 1440f * 72f
         val headingScale = when (props.headingLevel) {
             1 -> 1.8f; 2 -> 1.5f; 3 -> 1.3f; 4 -> 1.15f; else -> 1f
@@ -313,6 +313,7 @@ class DocxPageRenderer(private val context: Context) {
                     val canvas = Canvas(bitmap)
                     val scaleFactor = renderWidth / PAGE_WIDTH
                     canvas.scale(scaleFactor, scaleFactor)
+                    drawPageStories(canvas, doc)
 
                     val textSegments = mutableListOf<TextSegment>()
                     renderPageContent(canvas, pageIndex, doc, textSegments)
@@ -447,7 +448,7 @@ class DocxPageRenderer(private val context: Context) {
         }
 
         val counter = paragraph.listInfo?.let { state.getListCounter(it) } ?: 1
-        val listPrefix = layout.buildListPrefix(paragraph.listInfo, doc.numbering, counter)
+        val listPrefix = paragraph.listLabel ?: layout.buildListPrefix(paragraph.listInfo, doc.numbering, counter)
         val indent = props.indentLeftTwips / 1440f * 72f
         val headingScale = when (props.headingLevel) {
             1 -> 1.8f; 2 -> 1.5f; 3 -> 1.3f; 4 -> 1.15f; else -> 1f

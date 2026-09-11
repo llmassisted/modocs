@@ -22,6 +22,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.pdfbox.android)
     // FileProvider, for sharing documents out to other apps
     implementation(libs.androidx.core.ktx)
 

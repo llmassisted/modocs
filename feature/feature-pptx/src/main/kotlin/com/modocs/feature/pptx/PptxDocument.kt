@@ -10,6 +10,7 @@ data class PptxDocument(
     val slideWidth: Long = 9144000,   // EMU, default 10 inches
     val slideHeight: Long = 6858000,  // EMU, default 7.5 inches
     val rawEntries: Map<String, ByteArray> = emptyMap(),
+    val warnings: List<String> = emptyList(),
     /** Resolved theme color scheme from theme1.xml: name (dk1, lt1, accent1, etc.) -> ARGB int. */
     val themeColors: Map<String, Int> = emptyMap(),
 )

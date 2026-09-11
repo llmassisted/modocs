@@ -79,7 +79,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.modocs.core.ui.components.ErrorMessage
 import com.modocs.core.ui.components.LoadingIndicator
-import com.modocs.core.ui.components.ShareDocumentAction
+import com.modocs.core.ui.components.*
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.TextButton
 
 private val HighlightYellow = Color(0x66FFEB3B)
 private val HighlightOrange = Color(0x99FF9800)
@@ -102,8 +104,13 @@ fun XlsxViewerScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
-    var zoomScale by remember { mutableFloatStateOf(1f) }
+    val preferences = com.modocs.core.ui.components.rememberAppPreferences()
+    var zoomScale by remember { mutableFloatStateOf(preferences.spreadsheetZoom) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.xlsx" },
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", state.isDirty || state.draftDirty, state.isSaving, state.saveRevision,
+        viewModel::saveDocumentAs, onNavigateBack)
+
 
     // Collect events for snackbar
     LaunchedEffect(Unit) {
@@ -155,31 +162,17 @@ fun XlsxViewerScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = onNavigateBack) {
+                        IconButton(onClick = documentActions.back) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     },
                     actions = {
-                        IconButton(
-                            onClick = { zoomScale = (zoomScale - 0.25f).coerceAtLeast(0.5f) },
-                        ) {
-                            Icon(Icons.Filled.ZoomOut, contentDescription = "Zoom out")
-                        }
-                        Text(
-                            text = "${(zoomScale * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                        IconButton(
-                            onClick = { zoomScale = (zoomScale + 0.25f).coerceAtMost(3f) },
-                        ) {
-                            Icon(Icons.Filled.ZoomIn, contentDescription = "Zoom in")
-                        }
                         IconButton(onClick = { viewModel.toggleSearch() }) {
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
                         // Edit toggle
                         if (state.document != null) {
-                            IconButton(onClick = { viewModel.toggleEditMode() }) {
+                            IconButton(onClick = { viewModel.toggleEditMode() }, enabled = !state.isSaving) {
                                 Icon(
                                     if (state.isEditing) Icons.Filled.Close else Icons.Filled.Edit,
                                     contentDescription = if (state.isEditing) "Exit edit mode" else "Edit",
@@ -187,10 +180,7 @@ fun XlsxViewerScreen(
                                 )
                             }
                         }
-                        ShareDocumentAction(
-                            uri = uri,
-                            displayName = state.fileName.ifEmpty { null } ?: displayName,
-                        )
+                        IconButton(onClick = documentActions.share, enabled = !state.isSaving) { Icon(Icons.Default.Share, contentDescription = "Share document") }
                     },
                     scrollBehavior = scrollBehavior,
                 )
@@ -212,48 +202,8 @@ fun XlsxViewerScreen(
                     )
                 }
 
-                // Save bar when dirty
-                AnimatedVisibility(
-                    visible = state.isEditing && state.isDirty,
-                    enter = expandVertically(),
-                    exit = shrinkVertically(),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.primaryContainer)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Unsaved changes",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = { viewModel.saveDocument() },
-                            enabled = !state.isSaving,
-                        ) {
-                            Icon(
-                                Icons.Filled.Check,
-                                contentDescription = "Save",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                        Text(
-                            text = "Save As",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier
-                                .clickable {
-                                    saveAsLauncher.launch(state.fileName.ifEmpty { "spreadsheet.xlsx" })
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
-                }
-
+                DocumentEditBar(state.isDirty || state.draftDirty, state.isSaving, state.canUndo, viewModel::undo, documentActions.saveCopy)
+                DocumentWarnings(state.document?.warnings.orEmpty())
                 // Cell editing bar (at top so keyboard doesn't cover it)
                 AnimatedVisibility(
                     visible = state.isEditing && state.editingCell != null,
@@ -267,7 +217,7 @@ fun XlsxViewerScreen(
                             ?.find { it.rowIndex == editRow }
                             ?.cells?.find { it.columnIndex == editCol }
                             ?.value ?: ""
-                        var editText by remember(editRow, editCol) { mutableStateOf(currentValue) }
+                        val editText = state.draftText
                         val editFocusRequester = remember { FocusRequester() }
 
                         LaunchedEffect(editRow, editCol) {
@@ -290,7 +240,7 @@ fun XlsxViewerScreen(
 
                             TextField(
                                 value = editText,
-                                onValueChange = { editText = it },
+                                onValueChange = viewModel::updateDraft,
                                 modifier = Modifier
                                     .weight(1f)
                                     .focusRequester(editFocusRequester),
@@ -364,6 +314,7 @@ fun XlsxViewerScreen(
                     if (sheet != null) {
                         SheetContent(
                             sheet = sheet,
+                            documentKey = (state.activeUri ?: uri).toString(),
                             styles = document.styles,
                             searchState = searchState,
                             activeSheetIndex = state.activeSheetIndex,
@@ -375,217 +326,6 @@ fun XlsxViewerScreen(
                                 viewModel.startEditingCell(rowIndex, colIndex)
                             },
                         )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SheetContent(
-    sheet: XlsxSheet,
-    styles: List<XlsxCellStyle>,
-    searchState: XlsxSearchState,
-    activeSheetIndex: Int,
-    zoomScale: Float,
-    onZoomChange: (Float) -> Unit,
-    isEditing: Boolean,
-    editingCell: Pair<Int, Int>?,
-    onCellClick: (Int, Int) -> Unit,
-) {
-    val listState = rememberLazyListState()
-    val horizontalScrollState = rememberScrollState()
-
-    // Scroll to current search match
-    val currentMatch = searchState.currentMatch
-    LaunchedEffect(currentMatch) {
-        if (currentMatch != null && currentMatch.sheetIndex == activeSheetIndex) {
-            val targetRow = currentMatch.rowIndex
-            val itemIndex = sheet.rows.indexOfFirst { it.rowIndex == targetRow }
-            if (itemIndex >= 0) {
-                listState.animateScrollToItem(itemIndex + 1) // +1 for header row
-            }
-        }
-    }
-
-    val colCount = sheet.columnCount
-    if (colCount == 0 || sheet.rows.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("Empty sheet", style = MaterialTheme.typography.bodyLarge)
-        }
-        return
-    }
-
-    // Apply zoom to actual layout dimensions so LazyColumn scroll range is correct
-    val defaultColWidth = 80.dp * zoomScale
-    val rowHeaderWidth = 48.dp * zoomScale
-    val cellPadH = 4.dp * zoomScale
-    val cellPadV = 4.dp * zoomScale
-    val headerPadH = 4.dp * zoomScale
-    val headerPadV = 6.dp * zoomScale
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(SheetBackground)
-            .pointerInput(Unit) {
-                detectTransformGestures { _, _, zoom, _ ->
-                    onZoomChange((zoomScale * zoom).coerceIn(0.5f, 3f))
-                }
-            },
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            // Header row (column letters)
-            item(key = "header") {
-                Row(
-                    modifier = Modifier
-                        .horizontalScroll(horizontalScrollState)
-                        .height(IntrinsicSize.Min),
-                ) {
-                    // Corner cell
-                    Box(
-                        modifier = Modifier
-                            .width(rowHeaderWidth)
-                            .fillMaxHeight()
-                            .background(HeaderBackground)
-                            .border(0.5.dp, CellBorderColor),
-                    )
-
-                    for (col in 0 until colCount) {
-                        val colWidth = sheet.columnWidths[col]?.let { (it * 8 * zoomScale).dp }
-                            ?: defaultColWidth
-                        Box(
-                            modifier = Modifier
-                                .width(colWidth)
-                                .fillMaxHeight()
-                                .background(HeaderBackground)
-                                .border(0.5.dp, CellBorderColor)
-                                .padding(horizontal = headerPadH, vertical = headerPadV),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = columnLetter(col),
-                                fontSize = (11f * zoomScale).sp,
-                                fontWeight = FontWeight.Bold,
-                                color = HeaderTextColor,
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Data rows
-            items(
-                count = sheet.rows.size,
-                key = { sheet.rows[it].rowIndex },
-            ) { index ->
-                val row = sheet.rows[index]
-                Row(
-                    modifier = Modifier
-                        .horizontalScroll(horizontalScrollState)
-                        .height(IntrinsicSize.Min),
-                ) {
-                    // Row number
-                    Box(
-                        modifier = Modifier
-                            .width(rowHeaderWidth)
-                            .fillMaxHeight()
-                            .background(HeaderBackground)
-                            .border(0.5.dp, CellBorderColor)
-                            .padding(horizontal = headerPadH, vertical = headerPadV),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = "${row.rowIndex + 1}",
-                            fontSize = (11f * zoomScale).sp,
-                            fontWeight = FontWeight.Bold,
-                            color = HeaderTextColor,
-                        )
-                    }
-
-                    // Cells
-                    for (col in 0 until colCount) {
-                        val cell = row.cells.find { it.columnIndex == col }
-                        val colWidth = sheet.columnWidths[col]?.let { (it * 8 * zoomScale).dp }
-                            ?: defaultColWidth
-                        val cellStyle = cell?.let { styles.getOrNull(it.styleIndex) }
-
-                        val isEditingThis = editingCell?.first == row.rowIndex && editingCell.second == col
-
-                        val isSearchMatch = searchState.hasMatches &&
-                            searchState.matches.any {
-                                it.sheetIndex == activeSheetIndex &&
-                                    it.rowIndex == row.rowIndex &&
-                                    it.colIndex == col
-                            }
-                        val isCurrentMatch = searchState.currentMatch?.let {
-                            it.sheetIndex == activeSheetIndex &&
-                                it.rowIndex == row.rowIndex &&
-                                it.colIndex == col
-                        } ?: false
-
-                        val bgColor = when {
-                            isCurrentMatch -> HighlightOrange
-                            isSearchMatch -> HighlightYellow
-                            cellStyle?.fillColor != null -> Color(cellStyle.fillColor)
-                            else -> SheetBackground
-                        }
-
-                        val borderColor = when {
-                            isEditingThis -> EditingCellBorder
-                            else -> CellBorderColor.copy(alpha = 0.5f)
-                        }
-                        val borderWidth = if (isEditingThis) 2.dp else 0.5.dp
-
-                        Box(
-                            modifier = Modifier
-                                .width(colWidth)
-                                .fillMaxHeight()
-                                .background(bgColor)
-                                .border(borderWidth, borderColor)
-                                .padding(horizontal = cellPadH, vertical = cellPadV)
-                                .then(
-                                    if (isEditing) {
-                                        Modifier.clickable { onCellClick(row.rowIndex, col) }
-                                    } else {
-                                        Modifier
-                                    }
-                                ),
-                            contentAlignment = when (cellStyle?.horizontalAlignment) {
-                                CellAlignment.CENTER -> Alignment.Center
-                                CellAlignment.RIGHT -> Alignment.CenterEnd
-                                CellAlignment.GENERAL -> {
-                                    if (cell?.type == CellType.NUMBER || cell?.type == CellType.DATE) {
-                                        Alignment.CenterEnd
-                                    } else {
-                                        Alignment.CenterStart
-                                    }
-                                }
-                                else -> Alignment.CenterStart
-                            },
-                        ) {
-                            if (cell != null && cell.value.isNotEmpty()) {
-                                val cellFontSize = ((cellStyle?.fontSize ?: 11f) * zoomScale).sp
-                                Text(
-                                    text = cell.value,
-                                    fontWeight = if (cellStyle?.fontBold == true) FontWeight.Bold else FontWeight.Normal,
-                                    fontStyle = if (cellStyle?.fontItalic == true) FontStyle.Italic else FontStyle.Normal,
-                                    textDecoration = if (cellStyle?.fontUnderline == true) TextDecoration.Underline else TextDecoration.None,
-                                    fontSize = cellFontSize,
-                                    color = cellStyle?.fontColor?.let { Color(it) }
-                                        ?: DefaultCellTextColor,
-                                    maxLines = if (cellStyle?.wrapText == true) Int.MAX_VALUE else 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
                     }
                 }
             }
@@ -659,7 +399,7 @@ private fun SearchBar(
 }
 
 /** Convert 0-based column index to Excel-style letter (A, B, ..., Z, AA, AB, ...). */
-private fun columnLetter(index: Int): String {
+internal fun columnLetter(index: Int): String {
     val sb = StringBuilder()
     var n = index
     do {

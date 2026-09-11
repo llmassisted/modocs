@@ -13,6 +13,8 @@ data class XlsxDocument(
     val sheetPaths: Map<Int, String> = emptyMap(),
     /** Tracks which sheet indices have been modified by the editor. */
     val modifiedSheets: MutableSet<Int> = mutableSetOf(),
+    val editedCells: Map<Int, Set<Pair<Int, Int>>> = emptyMap(),
+    val warnings: List<String> = emptyList(),
 )
 
 data class XlsxSheet(

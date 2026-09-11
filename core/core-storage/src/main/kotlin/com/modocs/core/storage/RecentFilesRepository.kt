@@ -12,6 +12,7 @@ import javax.inject.Singleton
 @Singleton
 class RecentFilesRepository @Inject constructor(
     private val recentFileDao: RecentFileDao,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) {
 
     fun getRecentFiles(): Flow<List<RecentFile>> {
@@ -26,6 +27,7 @@ class RecentFilesRepository @Inject constructor(
         documentType: DocumentType,
         fileSizeBytes: Long?,
     ) {
+        if (!com.modocs.core.common.AppPreferences.get(context).state.value.keepRecents) return
         val existing = recentFileDao.findByUri(uri)
         val entity = RecentFileEntity(
             id = existing?.id ?: 0,
@@ -37,6 +39,8 @@ class RecentFilesRepository @Inject constructor(
         )
         recentFileDao.upsert(entity)
     }
+
+    suspend fun clearHistory() = recentFileDao.deleteAll()
 
     suspend fun removeRecentFile(id: Long) {
         recentFileDao.deleteById(id)

@@ -14,7 +14,16 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import com.modocs.core.ui.components.ShareDocumentAction
+import com.modocs.core.ui.components.*
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ListAlt
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedTextField
 import com.modocs.core.ui.components.ZoomableContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -120,6 +129,39 @@ fun PdfViewerScreen(
     val fillSignState by viewModel.fillSignState.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val printContext = androidx.compose.ui.platform.LocalContext.current
+    var showMore by remember { mutableStateOf(false) }
+
+    val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.pdf" },
+        "application/pdf", fillSignState.isDirty, fillSignState.isSaving, state.saveRevision,
+        viewModel::saveFilled, onNavigateBack)
+    var showForms by remember { mutableStateOf(false) }
+    if (showForms) AlertDialog(onDismissRequest = { showForms = false },
+        title = { Text("Fill form fields") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (state.formsLoading) item { Text("Finding form fields…") }
+                state.formError?.let { item { Text(it) } }
+                items(state.formFields.size) { index ->
+                    val field = state.formFields[index]
+                    val value = state.formValues[field.name] ?: field.value
+                    if (field.checkbox) Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = value == "true", onCheckedChange = { viewModel.updateFormValue(field.name, it.toString()) })
+                        Text(field.label)
+                    } else if (field.options.isNotEmpty()) Column {
+                        Text(field.label)
+                        field.options.forEach { option ->
+                            TextButton(onClick = { viewModel.updateFormValue(field.name, option) }) {
+                                Text((if (value == option) "✓ " else "") + option)
+                            }
+                        }
+                    } else OutlinedTextField(value = value, onValueChange = { viewModel.updateFormValue(field.name, it) },
+                        label = { Text(field.label) }, modifier = Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showForms = false }) { Text("Done") } })
+
 
     LaunchedEffect(uri) {
         viewModel.loadPdf(uri, displayName)
@@ -138,6 +180,7 @@ fun PdfViewerScreen(
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
+    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.pageCount > 0)
 
     // Scroll to page when current search match changes
     LaunchedEffect(searchState.currentMatch) {
@@ -194,7 +237,7 @@ fun PdfViewerScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = documentActions.back) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
@@ -217,10 +260,14 @@ fun PdfViewerScreen(
                             tint = if (fillSignState.isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                         )
                     }
-                    ShareDocumentAction(
-                        uri = uri,
-                        displayName = state.fileName.ifEmpty { null } ?: displayName,
-                    )
+                    Box {
+                        IconButton(onClick = { showMore = true }, enabled = !state.isLoading) { Icon(Icons.Default.MoreVert, contentDescription = "More document actions") }
+                        DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                            DropdownMenuItem(text = { Text("Fill form fields") }, onClick = { showMore = false; showForms = true; viewModel.loadFormFields() })
+                            DropdownMenuItem(text = { Text("Print") }, onClick = { showMore = false; viewModel.printDocument(printContext) })
+                        }
+                    }
+                    IconButton(onClick = documentActions.share, enabled = !fillSignState.isSaving) { Icon(Icons.Default.Share, contentDescription = "Share document") }
                 },
                 scrollBehavior = scrollBehavior,
             )
@@ -228,6 +275,8 @@ fun PdfViewerScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
+            DocumentEditBar(fillSignState.isDirty, fillSignState.isSaving, fillSignState.hasAnnotations,
+                viewModel::undoLastAnnotation, documentActions.saveCopy)
             // Search bar
             AnimatedVisibility(
                 visible = searchState.isSearchActive && !fillSignState.isActive,

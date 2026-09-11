@@ -63,6 +63,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.modocs.core.ui.components.ErrorMessage
 import com.modocs.core.ui.components.LoadingIndicator
 import com.modocs.core.ui.components.ShareDocumentAction
+import com.modocs.core.ui.components.DocumentWarnings
 
 // Fixed slide canvas background — neutral gray, not affected by dark/light theme
 private val SlideCanvasBackground = Color(0xFFE0E0E0)
@@ -76,6 +77,8 @@ fun PptxViewerScreen(
     viewModel: PptxViewerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    com.modocs.core.ui.components.ReaderKeepAwake()
+
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
 
     LaunchedEffect(uri) {
@@ -181,12 +184,11 @@ fun PptxViewerScreen(
                 )
             }
             state.document != null -> {
-                SlideViewer(
-                    viewModel = viewModel,
-                    document = state.document!!,
-                    currentSlide = state.currentSlide,
-                    modifier = Modifier.padding(innerPadding),
-                )
+                Column(Modifier.padding(innerPadding)) {
+                    DocumentWarnings(state.document!!.warnings)
+                    SlideViewer(viewModel = viewModel, document = state.document!!,
+                        currentSlide = state.currentSlide, modifier = Modifier.weight(1f))
+                }
             }
         }
     }

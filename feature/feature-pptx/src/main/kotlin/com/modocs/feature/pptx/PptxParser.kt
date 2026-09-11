@@ -45,6 +45,15 @@ object PptxParser {
     fun parse(inputStream: InputStream): PptxDocument {
         // Step 1: Read all ZIP entries (size-capped against zip bombs)
         val entries = readZipEntriesCapped(inputStream)
+        val warnings = mutableListOf<String>()
+        fun <T> tolerate(what: String, fallback: T, block: () -> T): T = try {
+            block()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            warnings.add("Could not read $what")
+            fallback
+        }
 
         // Steps 2-3: theme and relationships are optional — losing them costs
         // colours or images, not the deck.
@@ -64,10 +73,10 @@ object PptxParser {
         val slides = presInfo.slideRIds.mapIndexedNotNull { index, rId ->
             // One unparseable slide should cost that slide, not the deck.
             tolerate<PptxSlide?>("slide ${index + 1}", null) {
-                val target = presRels[rId] ?: return@mapIndexedNotNull null
+                val target = presRels[rId] ?: error("Missing slide relationship")
                 val slidePath = if (target.startsWith("/")) target.removePrefix("/")
                 else "ppt/$target"
-                val slideBytes = entries[slidePath] ?: return@mapIndexedNotNull null
+                val slideBytes = entries[slidePath] ?: error("Missing slide content")
 
                 // Parse per-slide relationships (for images + layout reference)
                 val slideFileName = slidePath.substringAfterLast("/")
@@ -157,6 +166,7 @@ object PptxParser {
             slideWidth = presInfo.slideWidth,
             slideHeight = presInfo.slideHeight,
             rawEntries = entries,
+            warnings = if (warnings.isEmpty()) emptyList() else listOf("Opened ${slides.size} of ${presInfo.slideRIds.size} slides") + warnings,
             themeColors = themeColors,
         )
     }

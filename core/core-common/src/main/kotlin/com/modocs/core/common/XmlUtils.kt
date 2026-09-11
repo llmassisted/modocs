@@ -37,8 +37,34 @@ fun createXmlParser(bytes: ByteArray): XmlPullParser {
     val factory = XmlPullParserFactory.newInstance()
     factory.isNamespaceAware = true
     val parser = factory.newPullParser()
-    parser.setInput(ByteArrayInputStream(stripUtf8Bom(bytes)), null)
-    return parser
+    val input = stripUtf8Bom(bytes)
+    parser.setInput(ByteArrayInputStream(input), null)
+    // Inspect the prolog before handing the parser to a caller whose next()
+    // would otherwise skip DOCDECL events. OOXML never needs a DTD.
+    var token = parser.nextToken()
+    while (token != XmlPullParser.START_TAG && token != XmlPullParser.END_DOCUMENT) {
+        if (token == XmlPullParser.DOCDECL) throw org.xml.sax.SAXException("Document type declarations are not supported")
+        token = parser.nextToken()
+    }
+    if (token == XmlPullParser.END_DOCUMENT) throw org.xml.sax.SAXException("Empty XML document")
+    parser.setInput(ByteArrayInputStream(input), null)
+    return object : XmlPullParser by parser {
+        private var openElements = 0
+        private fun checked(event: Int): Int {
+            when (event) {
+                XmlPullParser.START_TAG -> openElements++
+                XmlPullParser.END_TAG -> openElements--
+                XmlPullParser.END_DOCUMENT -> if (openElements != 0)
+                    throw org.xml.sax.SAXException("Incomplete XML document")
+                XmlPullParser.DOCDECL -> throw org.xml.sax.SAXException("Document type declarations are not supported")
+            }
+            return event
+        }
+        override fun next(): Int = checked(parser.next())
+        override fun nextToken(): Int = checked(parser.nextToken())
+        override fun nextTag(): Int = checked(parser.nextTag())
+        override fun nextText(): String = parser.nextText().also { openElements-- }
+    }
 }
 
 /**

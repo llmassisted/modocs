@@ -135,7 +135,7 @@ class PageLayoutCalculator(private val context: Context) {
 
         if (!suppressSpacing) state.yPos += props.spacingBeforePt
 
-        val listPrefix = buildListPrefix(paragraph.listInfo, document.numbering)
+        val listPrefix = paragraph.listLabel ?: buildListPrefix(paragraph.listInfo, document.numbering)
         val indent = props.indentLeftTwips / 1440f * 72f
         val headingScale = when (props.headingLevel) {
             1 -> 1.8f; 2 -> 1.5f; 3 -> 1.3f; 4 -> 1.15f; else -> 1f

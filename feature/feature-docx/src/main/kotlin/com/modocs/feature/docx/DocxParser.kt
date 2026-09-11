@@ -44,6 +44,15 @@ object DocxParser {
     fun parse(inputStream: InputStream): DocxDocument {
         // Step 1: Read all ZIP entries into memory (size-capped against zip bombs)
         val entries = readZipEntriesCapped(inputStream)
+        val warnings = mutableListOf<String>()
+        fun <T> tolerate(what: String, fallback: T, block: () -> T): T = try {
+            block()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            warnings.add("Could not read $what")
+            fallback
+        }
 
         // Steps 2-4: relationships, styles and numbering are all optional. A
         // malformed one costs the user images or formatting, not the document.
@@ -70,12 +79,42 @@ object DocxParser {
             ?: throw IllegalStateException("Missing word/document.xml")
         val (body, pageSetup) = parseDocumentBodyAndSetup(documentXml, styles, relationships)
 
+        val references = createParser(documentXml)
+        val storyIds = mutableMapOf<String, String>()
+        var sections = 0
+        while (references.next() != XmlPullParser.END_DOCUMENT) {
+            if (references.eventType != XmlPullParser.START_TAG) continue
+            if (references.name == "sectPr") sections++
+            if (references.name in listOf("headerReference", "footerReference")) {
+                if (references.getAttr("type") == "default") {
+                    references.getAttributeValue(NS_R, "id")?.let { storyIds[references.name] = it }
+                } else warnings.add("First-page or even-page header/footer layout is not shown")
+            }
+        }
+        if (sections > 1) warnings.add("Multiple section layouts use the final section's page setup")
+        fun story(kind: String, rootName: String): List<DocxParagraph> = tolerate("$rootName content", emptyList()) {
+            val id = storyIds[kind] ?: return@tolerate emptyList()
+            val target = relationships[id] ?: error("Missing $rootName relationship")
+            val path = if (target.startsWith("/")) target.removePrefix("/") else "word/$target"
+            val content = entries[path] ?: error("Missing $rootName content")
+            val elements = parseDocumentBodyAndSetup(content, styles, relationships, rootName).first
+            if (elements.any { it !is DocxParagraph }) warnings.add("Complex $rootName content is simplified to text")
+            elements.flatMap { element -> when (element) {
+                is DocxParagraph -> listOf(element)
+                is DocxTable -> element.rows.flatMap { it.cells.flatMap { cell -> cell.paragraphs } }
+                else -> emptyList()
+            } }
+        }
+        val header = story("headerReference", "hdr")
+        val footer = story("footerReference", "ftr")
         return DocxDocument(
-            body = body.toMutableList(),
+            body = resolveListLabels(DocxWriter.attachSources(body, documentXml), numbering).toMutableList(),
+            headerParagraphs = header, footerParagraphs = footer,
             styles = styles,
             numbering = numbering,
             images = images,
             rawEntries = entries,
+            warnings = warnings.toList(),
             pageSetup = pageSetup,
         )
     }
@@ -193,6 +232,9 @@ object DocxParser {
         var currentFormat = NumberFormat.BULLET
         var currentText = "•"
         var currentIndent = 720
+        var currentStart = 1
+        var overrideLevel = 0
+        val startOverrides = mutableMapOf<String, MutableMap<Int, Int>>()
         var inNum = false
         var currentNumId: String? = null
 
@@ -214,6 +256,12 @@ object DocxParser {
                             currentFormat = NumberFormat.BULLET
                             currentText = "•"
                             currentIndent = 720 * (currentLevel + 1)
+                            currentStart = 1
+                        }
+                        localName == "start" && inLvl -> currentStart = parser.getAttr("val")?.toIntOrNull() ?: 1
+                        localName == "lvlOverride" && inNum -> overrideLevel = parser.getAttr("ilvl")?.toIntOrNull() ?: 0
+                        localName == "startOverride" && inNum -> {
+                            startOverrides.getOrPut(currentNumId.orEmpty()) { mutableMapOf() }[overrideLevel] = parser.getAttr("val")?.toIntOrNull() ?: 1
                         }
                         localName == "numFmt" && inLvl -> {
                             currentFormat = when (parser.getAttr("val")) {
@@ -249,7 +297,7 @@ object DocxParser {
                             currentAbstractNumId?.let { id ->
                                 abstractNums[id]?.put(
                                     currentLevel,
-                                    NumberingLevel(currentLevel, currentFormat, currentText, currentIndent),
+                                    NumberingLevel(currentLevel, currentFormat, currentText, currentIndent, currentStart),
                                 )
                             }
                         }
@@ -264,7 +312,9 @@ object DocxParser {
         val result = mutableMapOf<String, NumberingDefinition>()
         for ((numId, abstractId) in numToAbstract) {
             val levels = abstractNums[abstractId] ?: continue
-            result[numId] = NumberingDefinition(abstractId, levels)
+            result[numId] = NumberingDefinition(abstractId, levels.mapValues { (level, definition) ->
+                definition.copy(start = startOverrides[numId]?.get(level) ?: definition.start)
+            })
         }
         return result
     }
@@ -275,6 +325,7 @@ object DocxParser {
         bytes: ByteArray,
         styles: Map<String, DocxStyle>,
         relationships: Map<String, String>,
+        rootName: String = "body",
     ): Pair<List<DocxElement>, PageSetup> {
         val elements = mutableListOf<DocxElement>()
         var pageSetup = PageSetup()
@@ -283,7 +334,7 @@ object DocxParser {
         // Navigate to w:body
         var foundBody = false
         while (parser.next() != XmlPullParser.END_DOCUMENT) {
-            if (parser.eventType == XmlPullParser.START_TAG && parser.name == "body") {
+            if (parser.eventType == XmlPullParser.START_TAG && parser.name == rootName) {
                 foundBody = true
                 break
             }

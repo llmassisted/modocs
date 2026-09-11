@@ -138,7 +138,7 @@ private fun ParagraphRenderer(
 
     // Handle list bullet/number prefix
     val listPrefix = remember(paragraph.listInfo, document.numbering) {
-        buildListPrefix(paragraph.listInfo, document.numbering)
+        paragraph.listLabel ?: buildListPrefix(paragraph.listInfo, document.numbering)
     }
 
     val textAlign = when (props.alignment) {

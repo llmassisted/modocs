@@ -33,7 +33,9 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
 
         setContent {
-            MoDocsTheme {
+            val prefs = com.modocs.core.ui.components.rememberAppPreferences()
+            val dark = when (prefs.theme) { "Dark" -> true; "Light" -> false; else -> androidx.compose.foundation.isSystemInDarkTheme() }
+            MoDocsTheme(darkTheme = dark, dynamicColor = prefs.dynamicColor) {
                 MoDocsApp(documentRequest = documentRequest)
             }
         }

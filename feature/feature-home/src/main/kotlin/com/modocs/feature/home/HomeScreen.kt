@@ -38,7 +38,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -60,10 +65,15 @@ import java.util.Locale
 fun HomeScreen(
     onDocumentOpened: (Uri, DocumentType, String?) -> Unit = { _, _, _ -> },
     viewModel: HomeViewModel = hiltViewModel(),
+    recentOnly: Boolean = false,
 ) {
     val context = LocalContext.current
     val recentFiles by viewModel.recentFiles.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    var query by rememberSaveable { mutableStateOf("") }
+    var typeFilter by rememberSaveable { mutableStateOf("All") }
+    val shown = recentFiles.filter { it.displayName.contains(query, ignoreCase = true) && (typeFilter == "All" || it.documentType.name == typeFilter) }
+
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -85,7 +95,7 @@ fun HomeScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("MoDocs") })
+            TopAppBar(title = { Text(if (recentOnly) "Recent files" else "MoDocs") })
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
@@ -96,20 +106,19 @@ fun HomeScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
-        if (recentFiles.isEmpty()) {
-            EmptyState(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
-        } else {
-            RecentFilesList(
-                recentFiles = recentFiles,
-                onFileClick = { viewModel.onRecentFileClicked(it) },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
+        Column(Modifier.fillMaxSize().padding(innerPadding)) {
+            if (recentOnly || recentFiles.isNotEmpty()) {
+                OutlinedTextField(query, { query = it }, label = { Text("Find a document") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("All", "PDF", "DOCX", "XLSX", "PPTX").forEach { type ->
+                        FilterChip(selected = typeFilter == type, onClick = { typeFilter = type }, label = { Text(type) })
+                    }
+                }
+            }
+            if (recentFiles.isEmpty()) EmptyState(Modifier.fillMaxSize())
+            else if (shown.isEmpty()) Text("No matching documents", Modifier.padding(24.dp))
+            else RecentFilesList(shown, { viewModel.onRecentFileClicked(it) }, Modifier.weight(1f))
         }
     }
 }
@@ -150,7 +159,7 @@ private fun RecentFilesList(
 ) {
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {

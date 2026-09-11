@@ -29,7 +29,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
+import androidx.compose.material3.Switch
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.platform.LocalContext
+import com.modocs.core.common.AppPreferences
+import com.modocs.core.ui.components.rememberAppPreferences
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.FilterChip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +51,15 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val store = remember(context) { AppPreferences.get(context) }
+    val prefs = rememberAppPreferences()
+    var confirmClear by remember { mutableStateOf(false) }
+    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear reading history?") },
+        text = { Text("Remove recent-file entries and saved reading positions. Your documents stay on your device.") },
+        confirmButton = { TextButton(onClick = { viewModel.clearHistory(); store.clearPositions(); confirmClear = false }) { Text("Clear history") } },
+        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } })
+
 
     Scaffold(
         topBar = {
@@ -56,6 +73,39 @@ fun SettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item {
+                SettingsGroup("Appearance") {
+                    Text("Theme", style = MaterialTheme.typography.bodyLarge)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("System", "Light", "Dark").forEach { theme ->
+                            FilterChip(selected = prefs.theme == theme, onClick = { store.update(prefs.copy(theme = theme)) }, label = { Text(theme) })
+                        }
+                    }
+                    PreferenceSwitch("Wallpaper colors", "Use Android’s color palette where supported", prefs.dynamicColor) { store.update(prefs.copy(dynamicColor = it)) }
+                    Text("Documents keep their original colors.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            item {
+                SettingsGroup("Reading") {
+                    PreferenceSwitch("Keep screen awake", "While a document is open", prefs.keepAwake) { store.update(prefs.copy(keepAwake = it)) }
+                    PreferenceSwitch("Remember reading position", "Resume pages and spreadsheet rows", prefs.rememberPosition) { store.update(prefs.copy(rememberPosition = it)) }
+                    Text("Default spreadsheet zoom", style = MaterialTheme.typography.bodyLarge)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(.75f, 1f, 1.25f, 1.5f).forEach { zoom ->
+                            FilterChip(selected = prefs.spreadsheetZoom == zoom, onClick = { store.update(prefs.copy(spreadsheetZoom = zoom)) }, label = { Text("${(zoom * 100).toInt()}%") })
+                        }
+                    }
+                }
+            }
+            item {
+                SettingsGroup("Privacy and storage") {
+                    PreferenceSwitch("Remember recent files", "Keep a list of documents you open", prefs.keepRecents) {
+                        store.update(prefs.copy(keepRecents = it)); if (!it) viewModel.clearHistory()
+                    }
+                    TextButton(onClick = { confirmClear = true }) { Text("Clear reading history") }
+                    Text("Edits are saved as copies. Documents are processed on your device.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
             item {
                 UpdateSection(
                     state = updateState,
@@ -239,5 +289,26 @@ private fun UpdateSection(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            content()
+        }
+    }
+}
+
+@Composable
+private fun PreferenceSwitch(title: String, summary: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }

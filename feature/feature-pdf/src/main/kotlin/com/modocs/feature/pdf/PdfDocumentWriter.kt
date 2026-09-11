@@ -1,5 +1,11 @@
 package com.modocs.feature.pdf
 
+import com.modocs.core.common.saveDocumentCopy
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
+import com.tom_roush.pdfbox.util.Matrix
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -7,23 +13,10 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
-import android.graphics.pdf.PdfDocument
-import android.graphics.pdf.PdfRenderer as AndroidPdfRenderer
 import android.net.Uri
-import android.os.ParcelFileDescriptor
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.io.File
 import kotlin.math.sqrt
 
-/**
- * Writes a filled/signed PDF by rendering each page bitmap
- * with annotations flattened on top.
- *
- * Uses its own PdfRenderer instance (separate from the viewer) to avoid
- * mutex contention and cache pollution. Renders one page at a time and
- * recycles bitmaps immediately to avoid OOM on large documents.
- */
+/** Append new marks without rasterizing original pages or changing their physical size. */
 object PdfDocumentWriter {
 
     /** Longest edge we will rasterise, in pixels. */
@@ -73,60 +66,42 @@ object PdfDocumentWriter {
         outputUri: Uri,
         pageCount: Int,
         annotations: List<PdfAnnotation>,
-    ) = withContext(Dispatchers.IO) {
-        // Open a dedicated renderer for saving — separate from the viewer's renderer
-        val fd = openReadDescriptor(context, sourceUri)
-
-        val reader = AndroidPdfRenderer(fd)
-        val pdfDoc = PdfDocument()
-
-        try {
-            for (pageIndex in 0 until pageCount) {
-                val srcPage = reader.openPage(pageIndex)
-                val pageWidth = srcPage.width
-                val pageHeight = srcPage.height
-
-                val (renderW, renderH) = renderSizeFor(pageWidth, pageHeight)
-
-                val bitmap = Bitmap.createBitmap(renderW, renderH, Bitmap.Config.ARGB_8888)
-                bitmap.eraseColor(Color.WHITE)
-                srcPage.render(bitmap, null, null, AndroidPdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-                srcPage.close()
-
-                // Create output page at the rendered size
-                val pageInfo = PdfDocument.PageInfo.Builder(renderW, renderH, pageIndex + 1).create()
-                val page = pdfDoc.startPage(pageInfo)
-                val canvas = page.canvas
-
-                canvas.drawBitmap(bitmap, 0f, 0f, null)
-                bitmap.recycle() // free immediately
-
-                // Draw annotations for this page
-                val pageAnnotations = annotations.filter { it.pageIndex == pageIndex }
-                for (annotation in pageAnnotations) {
-                    drawAnnotation(canvas, annotation, renderW, renderH)
+        formValues: Map<String, String> = emptyMap(),
+    ) = saveDocumentCopy(context, outputUri) { output ->
+        PDFBoxResourceLoader.init(context)
+        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+            PDDocument.load(input).use { document ->
+                require(document.numberOfPages == pageCount) { "The source PDF changed; reopen it before saving" }
+                PdfForms.applyValues(document, formValues)
+                for ((pageIndex, pageAnnotations) in annotations.groupBy { it.pageIndex }) {
+                    val page = document.getPage(pageIndex)
+                    val box = page.cropBox
+                    val rotation = ((page.rotation % 360) + 360) % 360
+                    val sideways = rotation == 90 || rotation == 270
+                    val displayW = if (sideways) box.height else box.width
+                    val displayH = if (sideways) box.width else box.height
+                    val (w, h) = renderSizeFor(displayW.toInt(), displayH.toInt())
+                    // Only the new marks are rasterized. Original page streams, text, links,
+                    // forms, crop boxes and physical dimensions remain in the PDF.
+                    val overlay = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    try {
+                        val canvas = Canvas(overlay)
+                        pageAnnotations.forEach { drawAnnotation(canvas, it, w, h) }
+                        val image = LosslessFactory.createFromImage(document, overlay)
+                        PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
+                            val matrix = when (rotation) {
+                                90 -> Matrix(0f, box.height, -box.width, 0f, box.upperRightX, box.lowerLeftY)
+                                180 -> Matrix(-box.width, 0f, 0f, -box.height, box.upperRightX, box.upperRightY)
+                                270 -> Matrix(0f, -box.height, box.width, 0f, box.lowerLeftX, box.upperRightY)
+                                else -> Matrix(box.width, 0f, 0f, box.height, box.lowerLeftX, box.lowerLeftY)
+                            }
+                            stream.drawImage(image, matrix)
+                        }
+                    } finally { overlay.recycle() }
                 }
-
-                pdfDoc.finishPage(page)
+                document.save(output)
             }
-
-            context.contentResolver.openOutputStream(outputUri)?.use { outputStream ->
-                pdfDoc.writeTo(outputStream)
-            }
-        } finally {
-            pdfDoc.close()
-            reader.close()
-            fd.close()
-        }
-    }
-
-    private fun openReadDescriptor(context: Context, uri: Uri): ParcelFileDescriptor {
-        if (uri.scheme == "file") {
-            val path = uri.path ?: throw IllegalStateException("Cannot open source PDF")
-            return ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_ONLY)
-        }
-        return context.contentResolver.openFileDescriptor(uri, "r")
-            ?: throw IllegalStateException("Cannot open source PDF")
+        } ?: error("Cannot read the source PDF")
     }
 
     private fun drawAnnotation(

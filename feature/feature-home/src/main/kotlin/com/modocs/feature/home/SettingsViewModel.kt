@@ -33,6 +33,7 @@ data class UpdateState(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val updateChecker: AppUpdateChecker,
+    private val recents: com.modocs.core.storage.RecentFilesRepository,
 ) : ViewModel() {
 
     private val _updateState = MutableStateFlow(
@@ -42,6 +43,8 @@ class SettingsViewModel @Inject constructor(
 
     private var latestRelease: AppUpdateChecker.ReleaseInfo? = null
     private var downloadedApk: File? = null
+
+    fun clearHistory() { viewModelScope.launch { recents.clearHistory() } }
 
     fun checkForUpdate() {
         viewModelScope.launch {

@@ -27,6 +27,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.androidx.activity.compose)
     implementation(project(":core:core-common"))
     implementation(project(":fonts"))
 

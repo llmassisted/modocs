@@ -31,6 +31,9 @@ data class DocxViewerState(
     val isEditing: Boolean = false,
     val isDirty: Boolean = false,
     val isSaving: Boolean = false,
+    val activeUri: Uri? = null,
+    val saveRevision: Int = 0,
+    val canUndo: Boolean = false,
     val editingElementIndex: Int = -1,
     val viewMode: DocxViewMode = DocxViewMode.CANVAS,
     val pageCount: Int = 0,
@@ -113,6 +116,24 @@ class DocxViewerViewModel @Inject constructor(
     private val layoutCalculator = PageLayoutCalculator(context)
     private var pageRenderer: DocxPageRenderer? = null
     private var documentUri: Uri? = null
+    private val undoHistory = ArrayDeque<DocxDocument>()
+
+    private fun recordUndo(document: DocxDocument) {
+        if (undoHistory.size >= 50) undoHistory.removeFirst()
+        undoHistory.addLast(document)
+    }
+
+    fun undo() {
+        if (_state.value.isSaving || undoHistory.isEmpty()) return
+        val document = undoHistory.removeLast()
+        _state.value = _state.value.copy(document = document, isDirty = true, canUndo = undoHistory.isNotEmpty(), editingElementIndex = -1)
+        elementTexts = document.body.map { (it as? DocxParagraph)?.text ?: "" }
+        pageRenderer?.invalidateCache()
+        pageRenderer?.prepare(document)
+        _state.value = _state.value.copy(formattingVersion = _state.value.formattingVersion + 1)
+        performSearch(_searchState.value.query)
+    }
+
     private var searchJob: Job? = null
     private var editingSelectionStart: Int = 0
     private var editingSelectionEnd: Int = 0
@@ -138,6 +159,7 @@ class DocxViewerViewModel @Inject constructor(
         if (_state.value.document != null) return
 
         documentUri = uri
+        _state.value = _state.value.copy(activeUri = uri)
 
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, errorMessage = null)
@@ -541,6 +563,7 @@ class DocxViewerViewModel @Inject constructor(
     // --- Editing ---
 
     fun toggleEditMode() {
+        if (_state.value.isSaving) return
         val current = _state.value
         val enteringEdit = !current.isEditing
 
@@ -571,7 +594,11 @@ class DocxViewerViewModel @Inject constructor(
     }
 
     fun startEditingElement(index: Int) {
-        if (!_state.value.isEditing) return
+        if (!_state.value.isEditing || _state.value.isSaving) return
+        if ((_state.value.document?.body?.getOrNull(index) as? DocxParagraph)?.safelyEditable != true) {
+            viewModelScope.launch { _events.emit(DocxEvent.SaveError("This paragraph contains complex content; it is read-only to preserve the original")) }
+            return
+        }
         editingSelectionStart = 0
         editingSelectionEnd = 0
         _state.value = _state.value.copy(editingElementIndex = index)
@@ -597,14 +624,15 @@ class DocxViewerViewModel @Inject constructor(
         // Skip if text hasn't changed (e.g., only cursor/selection moved)
         if (element.text == newText) return
 
-        // Rebuild runs: keep first run's properties, replace text
-        val baseProps = element.runs.firstOrNull()?.properties ?: RunProperties()
-        val newRuns = listOf(DocxRun(newText, baseProps))
-
-        document.body[elementIndex] = element.copy(runs = newRuns)
-        if (!_state.value.isDirty) {
-            _state.value = _state.value.copy(isDirty = true)
-        }
+        if (_state.value.isSaving || !element.safelyEditable) return
+        recordUndo(document)
+        val originalRuns = (document.originalBody.getOrNull(elementIndex) as? DocxParagraph)?.runs.orEmpty()
+        val inputRuns = element.runs.ifEmpty { originalRuns.firstOrNull()?.copy(text = "")?.let { listOf(it) }.orEmpty() }
+        val newRuns = replaceParagraphText(inputRuns, newText)
+        val body = document.body.toMutableList()
+        body[elementIndex] = element.copy(runs = newRuns)
+        _state.value = _state.value.copy(document = document.copy(body = body), isDirty = true,
+            canUndo = true, formattingVersion = _state.value.formattingVersion + 1)
 
         // Update search text cache
         if (elementIndex < elementTexts.size) {
@@ -633,6 +661,8 @@ class DocxViewerViewModel @Inject constructor(
         val document = _state.value.document ?: return
         val element = document.body.getOrNull(elementIndex) as? DocxParagraph ?: return
 
+        if (_state.value.isSaving || !element.safelyEditable) return
+        recordUndo(document)
         val selStart = editingSelectionStart
         val selEnd = editingSelectionEnd
 
@@ -647,6 +677,7 @@ class DocxViewerViewModel @Inject constructor(
         newBody[elementIndex] = element.copy(runs = newRuns)
         _state.value = _state.value.copy(
             isDirty = true,
+            canUndo = true,
             document = document.copy(body = newBody),
             formattingVersion = _state.value.formattingVersion + 1,
         )
@@ -681,14 +712,11 @@ class DocxViewerViewModel @Inject constructor(
                     val splitStart = (selStart - runStart).coerceAtLeast(0)
                     val splitEnd = (selEnd - runStart).coerceAtMost(runText.length)
                     if (splitStart > 0) {
-                        result.add(DocxRun(runText.substring(0, splitStart), run.properties))
+                        result.add(run.copy(text = runText.substring(0, splitStart)))
                     }
-                    result.add(DocxRun(
-                        runText.substring(splitStart, splitEnd),
-                        transform(run.properties),
-                    ))
+                    result.add(run.copy(text = runText.substring(splitStart, splitEnd), properties = transform(run.properties)))
                     if (splitEnd < runText.length) {
-                        result.add(DocxRun(runText.substring(splitEnd), run.properties))
+                        result.add(run.copy(text = runText.substring(splitEnd)))
                     }
                 }
             }
@@ -717,6 +745,7 @@ class DocxViewerViewModel @Inject constructor(
     }
 
     fun saveDocument() {
+        if (_state.value.isSaving) return
         val document = _state.value.document ?: return
         val uri = documentUri ?: return
 
@@ -724,7 +753,7 @@ class DocxViewerViewModel @Inject constructor(
             // Writing the decrypted document back over the original would remove
             // its password with no warning — a confidentiality regression the
             // user never asked for. Make them choose a destination instead.
-            if (_state.value.wasPasswordProtected) {
+            if (_state.value.wasPasswordProtected || document.warnings.isNotEmpty()) {
                 _events.emit(
                     DocxEvent.SaveError(
                         "This document is password-protected. Saving over it would " +
@@ -739,6 +768,8 @@ class DocxViewerViewModel @Inject constructor(
                 DocxWriter.save(context, document, uri)
                 _state.value = _state.value.copy(isDirty = false, isSaving = false)
                 _events.emit(DocxEvent.SaveSuccess("Document saved"))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(isSaving = false)
                 _events.emit(DocxEvent.SaveError("Save failed: ${e.message ?: "Unknown error"}"))
@@ -747,26 +778,49 @@ class DocxViewerViewModel @Inject constructor(
     }
 
     fun saveDocumentAs(outputUri: Uri) {
+        if (_state.value.isSaving) return
+        if (outputUri == documentUri) {
+            viewModelScope.launch { _events.emit(DocxEvent.SaveError("Choose a new file to keep the original safe")) }; return
+        }
         val document = _state.value.document ?: return
 
         viewModelScope.launch {
             _state.value = _state.value.copy(isSaving = true)
             try {
                 DocxWriter.save(context, document, outputUri)
-                _state.value = _state.value.copy(isDirty = false, isSaving = false)
+                val wasProtected = _state.value.wasPasswordProtected
+                documentUri = outputUri
+                _state.value = _state.value.copy(isDirty = false, isSaving = false,
+                    activeUri = outputUri, fileName = resolveFileName(outputUri) ?: _state.value.fileName,
+                    wasPasswordProtected = false, saveRevision = _state.value.saveRevision + 1)
                 _events.emit(
                     DocxEvent.SaveSuccess(
-                        if (_state.value.wasPasswordProtected) {
+                        if (_state.value.wasPasswordProtected || document.warnings.isNotEmpty()) {
                             "Saved — note this copy is not password-protected"
                         } else {
                             "Document saved"
                         }
                     )
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(isSaving = false)
                 _events.emit(DocxEvent.SaveError("Save failed: ${e.message ?: "Unknown error"}"))
             }
+        }
+    }
+
+    fun printDocument(activityContext: Context) {
+        if (_state.value.isSaving) return
+        viewModelScope.launch {
+            val copy = java.io.File.createTempFile("print_", ".pdf", context.cacheDir)
+            try {
+                val document = _state.value.document ?: error("No document open")
+                DocxToPdfConverter(context).convertToUri(document, Uri.fromFile(copy))
+                com.modocs.core.common.printPdf(activityContext, copy, _state.value.fileName)
+            } catch (e: kotlinx.coroutines.CancellationException) { copy.delete(); throw e }
+            catch (e: Exception) { copy.delete(); _events.emit(DocxEvent.SaveError("Could not print: ${e.message}")) }
         }
     }
 

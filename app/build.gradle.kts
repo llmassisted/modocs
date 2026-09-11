@@ -27,12 +27,11 @@ android {
 
     defaultConfig {
         applicationId = "com.modocs.app"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 26
         targetSdk = 35
-        versionCode = 176
-        versionName = "1.76"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 177
+        versionName = "1.77"
     }
 
     signingConfigs {
@@ -117,4 +116,8 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation(libs.pdfbox.android)
+    androidTestImplementation(project(":core:core-common"))
 }

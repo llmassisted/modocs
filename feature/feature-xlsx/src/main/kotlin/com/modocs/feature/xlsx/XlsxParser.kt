@@ -36,6 +36,15 @@ object XlsxParser {
         // This one genuinely cannot be recovered from — without entries there is
         // no document — so it is the only step allowed to propagate.
         val entries = readZipEntriesCapped(inputStream)
+        val warnings = mutableListOf<String>()
+        fun <T> tolerate(what: String, fallback: T, block: () -> T): T = try {
+            block()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            warnings.add("Could not read $what")
+            fallback
+        }
 
         // Steps 2-5: every remaining part is optional. A malformed styles.xml or
         // relationship part should cost the user formatting, not the whole file,
@@ -59,8 +68,10 @@ object XlsxParser {
         val sheets = mutableListOf<XlsxSheet>()
         var sheetIndex = 0
         for ((ordinal, info) in sheetInfos.withIndex()) {
-            val sheetPath = resolveSheetPath(info, ordinal, rels, entries) ?: continue
-            val sheetBytes = entries[sheetPath] ?: continue
+            val sheetPath = resolveSheetPath(info, ordinal, rels, entries)
+            if (sheetPath == null) { warnings.add("Missing sheet: ${info.name}"); continue }
+            val sheetBytes = entries[sheetPath]
+            if (sheetBytes == null) { warnings.add("Missing sheet: ${info.name}"); continue }
             val sheet = tolerate<XlsxSheet?>("sheet '${info.name}'", null) {
                 parseSheet(info.name, sheetBytes, sharedStrings, styles)
             } ?: continue
@@ -73,6 +84,7 @@ object XlsxParser {
             sheets = sheets,
             styles = styles,
             rawEntries = entries,
+            warnings = if (warnings.isEmpty()) emptyList() else listOf("Opened ${sheets.size} of ${sheetInfos.size} sheets") + warnings,
             sheetPaths = sheetPathMap,
         )
     }

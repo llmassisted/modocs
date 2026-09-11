@@ -10,11 +10,13 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="sharedpref" path="reading_positions.xml" />
         <exclude domain="database" path="modocs.db" />
         <exclude domain="database" path="modocs.db-shm" />
         <exclude domain="database" path="modocs.db-wal" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="sharedpref" path="reading_positions.xml" />
         <exclude domain="database" path="modocs.db" />
         <exclude domain="database" path="modocs.db-shm" />
         <exclude domain="database" path="modocs.db-wal" />

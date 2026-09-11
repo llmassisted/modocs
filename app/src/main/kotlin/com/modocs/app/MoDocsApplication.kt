@@ -16,6 +16,9 @@ class MoDocsApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        cacheDir.listFiles { file -> file.isFile &&
+            (file.name.startsWith("document_save_") || file.name.startsWith("print_"))
+        }?.forEach { it.delete() }
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             sweepDecryptedTempFiles()
             sweepShareCache()

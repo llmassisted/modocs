@@ -10,7 +10,12 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import com.modocs.core.ui.components.ShareDocumentAction
+import com.modocs.core.ui.components.*
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.TextButton
 import com.modocs.core.ui.components.ZoomableContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,6 +72,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -113,6 +119,13 @@ fun DocxViewerScreen(
     val autoPageBreaks by viewModel.autoPageBreaks.collectAsStateWithLifecycle()
     val formattingAtCursor by viewModel.formattingAtCursor.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val printContext = androidx.compose.ui.platform.LocalContext.current
+    var showMore by remember { mutableStateOf(false) }
+
+    val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.docx" },
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", state.isDirty, state.isSaving, state.saveRevision,
+        viewModel::saveDocumentAs, onNavigateBack)
+
 
     // SAF launcher for "Save As PDF"
     val pdfSaveLauncher = rememberLauncherForActivityResult(
@@ -164,6 +177,7 @@ fun DocxViewerScreen(
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
+    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.viewMode == DocxViewMode.CANVAS && state.pageCount > 0)
 
     // Scroll to match when current search match changes
     LaunchedEffect(searchState.currentMatch, state.viewMode) {
@@ -204,7 +218,7 @@ fun DocxViewerScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = documentActions.back) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
@@ -213,38 +227,22 @@ fun DocxViewerScreen(
                 },
                 actions = {
                     if (state.document != null) {
-                        // Save button (visible when dirty)
-                        if (state.isDirty) {
-                            IconButton(onClick = { viewModel.saveDocument() }, enabled = !state.isSaving) {
-                                if (state.isSaving) {
-                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Default.Save, contentDescription = "Save")
-                                }
-                            }
-                            IconButton(onClick = {
-                                val docxName = state.fileName
-                                saveAsLauncher.launch(docxName)
-                            }) {
-                                Icon(Icons.Default.SaveAs, contentDescription = "Save As")
-                            }
-                        }
-
                         // Edit toggle
-                        IconButton(onClick = { viewModel.toggleEditMode() }) {
+                        IconButton(onClick = { viewModel.toggleEditMode() }, enabled = !state.isSaving) {
                             Icon(
                                 imageVector = if (state.isEditing) Icons.Default.EditOff else Icons.Default.Edit,
                                 contentDescription = if (state.isEditing) "Stop editing" else "Edit document",
                             )
                         }
 
-                        // Export to PDF button
-                        IconButton(onClick = {
-                            val pdfName = state.fileName
-                                .removeSuffix(".docx").removeSuffix(".doc") + ".pdf"
-                            pdfSaveLauncher.launch(pdfName)
-                        }) {
-                            Icon(Icons.Default.PictureAsPdf, contentDescription = "Export to PDF")
+                        Box {
+                            IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More document actions") }
+                            DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                                DropdownMenuItem(text = { Text("Export PDF") }, onClick = {
+                                    showMore = false; pdfSaveLauncher.launch(state.fileName.substringBeforeLast('.') + ".pdf")
+                                })
+                                DropdownMenuItem(text = { Text("Print") }, onClick = { showMore = false; viewModel.printDocument(printContext) })
+                            }
                         }
                     }
 
@@ -255,14 +253,13 @@ fun DocxViewerScreen(
                         )
                     }
 
-                    ShareDocumentAction(
-                        uri = uri,
-                        displayName = state.fileName.ifEmpty { null } ?: displayName,
-                    )
+                    IconButton(onClick = documentActions.share, enabled = !state.isSaving) { Icon(Icons.Default.Share, contentDescription = "Share document") }
                 },
                 scrollBehavior = scrollBehavior,
             )
 
+            DocumentEditBar(state.isDirty, state.isSaving, state.canUndo, viewModel::undo, documentActions.saveCopy)
+            DocumentWarnings(state.document?.warnings.orEmpty())
             if (state.isEditing && state.editingElementIndex >= 0) {
                 FormattingToolbar(
                     isBold = formattingAtCursor.bold,

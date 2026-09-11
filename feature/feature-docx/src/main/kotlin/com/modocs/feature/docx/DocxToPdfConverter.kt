@@ -30,7 +30,7 @@ class DocxToPdfConverter(private val context: Context) {
     /**
      * Mutable state for the current page being drawn.
      */
-    private inner class PdfState(val pdfDocument: PdfDocument) {
+    private inner class PdfState(val pdfDocument: PdfDocument, val document: DocxDocument) {
         var pageNumber = 0
         var page: PdfDocument.Page? = null
         var canvas: Canvas? = null
@@ -52,6 +52,7 @@ class DocxToPdfConverter(private val context: Context) {
             val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH.toInt(), PAGE_HEIGHT.toInt(), pageNumber).create()
             page = pdfDocument.startPage(pageInfo)
             canvas = page!!.canvas
+            drawPageStories(canvas!!, document)
             yPos = MARGIN_TOP
         }
 
@@ -80,7 +81,7 @@ class DocxToPdfConverter(private val context: Context) {
             layout.configure(setup)
 
             val pdfDocument = PdfDocument()
-            val state = PdfState(pdfDocument)
+            val state = PdfState(pdfDocument, document)
 
             try {
                 state.startNewPage()
@@ -129,7 +130,7 @@ class DocxToPdfConverter(private val context: Context) {
 
         // List prefix with counter tracking
         val counter = paragraph.listInfo?.let { state.getListCounter(it) } ?: 1
-        val listPrefix = layout.buildListPrefix(paragraph.listInfo, document.numbering, counter)
+        val listPrefix = paragraph.listLabel ?: layout.buildListPrefix(paragraph.listInfo, document.numbering, counter)
 
         // Indentation (twips → points: twips / 1440 * 72)
         val indent = props.indentLeftTwips / 1440f * 72f
