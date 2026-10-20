@@ -11,16 +11,25 @@ import android.provider.OpenableColumns
  */
 const val MAX_FILE_SIZE_BYTES = 100L * 1024 * 1024
 
-enum class DocumentType(val displayName: String, val mimeType: String) {
+enum class DocumentType(
+    val displayName: String,
+    val mimeType: String,
+    /** Other MIME types that apps and document providers report for this format. */
+    val alternateMimeTypes: List<String> = emptyList(),
+) {
     PDF("PDF", "application/pdf"),
     DOCX("Word Document", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
     XLSX("Excel Spreadsheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     PPTX("PowerPoint Presentation", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+    // Older Android versions map .csv to text/comma-separated-values, and some apps send the others.
+    CSV("CSV File", "text/csv", listOf("text/comma-separated-values", "application/csv", "text/x-csv")),
     UNKNOWN("Unknown", "application/octet-stream");
 
     companion object {
-        fun fromMimeType(mimeType: String?): DocumentType =
-            entries.firstOrNull { it != UNKNOWN && it.mimeType == mimeType } ?: UNKNOWN
+        fun fromMimeType(mimeType: String?): DocumentType {
+            val type = mimeType?.substringBefore(';')?.trim()?.lowercase()
+            return entries.firstOrNull { it != UNKNOWN && (it.mimeType == type || type in it.alternateMimeTypes) } ?: UNKNOWN
+        }
 
         fun fromFileName(name: String): DocumentType {
             val ext = name.substringAfterLast('.', "").lowercase()
@@ -29,6 +38,7 @@ enum class DocumentType(val displayName: String, val mimeType: String) {
                 "docx" -> DOCX
                 "xlsx" -> XLSX
                 "pptx" -> PPTX
+                "csv" -> CSV
                 else -> UNKNOWN
             }
         }

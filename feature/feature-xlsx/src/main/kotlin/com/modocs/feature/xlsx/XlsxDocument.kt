@@ -64,6 +64,13 @@ enum class CellType {
     STRING, NUMBER, BOOLEAN, DATE, ERROR, INLINE_STRING
 }
 
+private val ZeroPaddedNumber = Regex("[+-]?0[0-9]+.*")
+
+/** Type for plain text entered by the user or read from CSV; zero-padded codes such as ZIPs stay text. */
+internal fun inferCellType(value: String): CellType {
+    return if (value.toDoubleOrNull()?.isFinite() == true && !ZeroPaddedNumber.matches(value)) CellType.NUMBER else CellType.STRING
+}
+
 data class XlsxCellStyle(
     val fontBold: Boolean = false,
     val fontItalic: Boolean = false,
