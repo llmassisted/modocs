@@ -60,6 +60,7 @@ object Routes {
     const val DOCX_VIEWER = "docx_viewer?uri={uri}&name={name}"
     const val XLSX_VIEWER = "xlsx_viewer?uri={uri}&name={name}"
     const val PPTX_VIEWER = "pptx_viewer?uri={uri}&name={name}"
+    const val CSV_VIEWER = "csv_viewer?uri={uri}&name={name}"
 
     fun pdfViewer(uri: Uri, displayName: String? = null): String {
         val encoded = Uri.encode(uri.toString())
@@ -85,6 +86,12 @@ object Routes {
         return "pptx_viewer?uri=$encoded&name=$name"
     }
 
+    fun csvViewer(uri: Uri, displayName: String? = null): String {
+        val encoded = Uri.encode(uri.toString())
+        val name = Uri.encode(displayName ?: "")
+        return "csv_viewer?uri=$encoded&name=$name"
+    }
+
     /**
      * Route to the viewer for [documentType], or null when there is no viewer.
      *
@@ -99,6 +106,7 @@ object Routes {
             DocumentType.DOCX -> docxViewer(uri, displayName)
             DocumentType.XLSX -> xlsxViewer(uri, displayName)
             DocumentType.PPTX -> pptxViewer(uri, displayName)
+            DocumentType.CSV -> csvViewer(uri, displayName)
             DocumentType.UNKNOWN -> null
         }
     }
@@ -342,6 +350,36 @@ fun MoDocsApp(
                 uri = uri,
                 displayName = name.ifEmpty { null },
                 onNavigateBack = navigateBack,
+            )
+        }
+
+        // CSV Viewer: the spreadsheet viewer, read-only (full screen, no bottom nav)
+        composable(
+            route = Routes.CSV_VIEWER,
+            arguments = listOf(
+                navArgument("uri") { type = NavType.StringType },
+                navArgument("name") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+            ),
+        ) { backStackEntry ->
+            val uriString = backStackEntry.arguments?.getString("uri") ?: ""
+            val name = backStackEntry.arguments?.getString("name") ?: ""
+            val uri = Uri.parse(uriString)
+            val navigateBack = {
+                if (!navController.popBackStack()) {
+                    activity?.moveTaskToBack(true)
+                }
+                Unit
+            }
+
+            BackHandler(onBack = navigateBack)
+            XlsxViewerScreen(
+                uri = uri,
+                displayName = name.ifEmpty { null },
+                onNavigateBack = navigateBack,
+                isCsv = true,
             )
         }
     }

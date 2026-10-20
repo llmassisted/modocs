@@ -10,6 +10,7 @@ If you're like me, you sometimes use your phone to look at docs, fill out forms,
 - **DOCX** — View Word documents, edit simple paragraphs with undo, save copies without rebuilding the whole document, export PDF, and print
 - **XLSX** — View merged cells and frozen headings, jump to cells, search, edit input cells with undo, and save copies while preserving worksheet metadata
 - **PPTX** — View presentations with text, shapes, images, and backgrounds
+- **CSV** — View comma-, semicolon-, tab-, or pipe-separated files in the spreadsheet grid with search, jump-to-cell, and zoom
 
 Recent files can be searched and filtered by format. Viewer save actions create a copy;
 after saving, sharing sends that copy. Pending edits trigger a save-and-share prompt,
@@ -49,6 +50,11 @@ Grab the latest APK from [Releases](https://github.com/llmassisted/modocs/releas
 - Complex graphics, SmartArt, charts, and animations will not render
 - No editing support for presentations — just viewing
 - If you need to do a lot of presentation editing on mobile, just get Microsoft Office
+
+### CSV
+- Read-only — open the file in a spreadsheet app to edit it
+- Values are shown exactly as written: no formulas, and no date or number formatting
+- Files over 500,000 cells show their first rows, with a notice, to stay within phone memory
 
 ### PDF
 - Fill & sign appends transparent image overlays for new marks; original page streams, text, links, crop boxes, and dimensions are preserved. Added marks are not searchable text or cryptographic signatures.
@@ -100,6 +106,7 @@ PRs welcome for any of these.
 
 A synthetic regression corpus lives in `app/src/androidTest/assets/`. Tests verify
 DOCX XML preservation, XLSX metadata/formula preservation, PDF dimensions/rotation/text/forms,
+CSV quoting/encodings/delimiters,
 saved-copy tracking, draft commits, undo, XML rejection, and preference persistence.
 
 ```bash
