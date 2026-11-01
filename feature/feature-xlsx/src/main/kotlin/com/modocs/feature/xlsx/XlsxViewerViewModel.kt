@@ -316,7 +316,7 @@ class XlsxViewerViewModel @Inject constructor(
             viewModelScope.launch { _events.emit(XlsxEvent.Error("Formula: ${cell.formula} — cached result ${cell.value}. Formula cells are read-only.")) }
             return
         }
-        _state.value = _state.value.copy(editingCell = rowIndex to colIndex, draftText = cell?.value.orEmpty(), draftDirty = false)
+        _state.value = _state.value.copy(editingCell = rowIndex to colIndex, draftText = cell?.editableText.orEmpty(), draftDirty = false)
     }
 
     fun stopEditingCell() {
@@ -327,7 +327,7 @@ class XlsxViewerViewModel @Inject constructor(
         if (_state.value.isSaving) return
         val state = _state.value
         val cell = state.editingCell ?: return
-        val original = state.document?.sheets?.getOrNull(state.activeSheetIndex)?.cellAt(cell.first, cell.second)?.value.orEmpty()
+        val original = state.document?.sheets?.getOrNull(state.activeSheetIndex)?.cellAt(cell.first, cell.second)?.editableText.orEmpty()
         _state.value = state.copy(draftText = text, draftDirty = text != original)
     }
 
@@ -343,7 +343,7 @@ class XlsxViewerViewModel @Inject constructor(
         val sheetIndex = _state.value.activeSheetIndex
         val sheet = document.sheets.getOrNull(sheetIndex) ?: return
 
-        if (_state.value.isSaving || sheet.cellAt(rowIndex, colIndex)?.value == newValue) return
+        if (_state.value.isSaving || sheet.cellAt(rowIndex, colIndex)?.editableText == newValue) return
         // Shared/array formulas cannot be replaced one cell at a time safely.
         if (sheet.rows.any { row -> row.cells.any { it.formula != null } } && sheet.cellAt(rowIndex, colIndex)?.formula != null) {
             viewModelScope.launch { _events.emit(XlsxEvent.Error("Formula cells are read-only; edit an input cell instead")) }

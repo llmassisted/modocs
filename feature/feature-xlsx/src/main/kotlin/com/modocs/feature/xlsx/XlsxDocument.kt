@@ -64,6 +64,10 @@ enum class CellType {
     STRING, NUMBER, BOOLEAN, DATE, ERROR, INLINE_STRING
 }
 
+/** What the editor starts from: the stored number behind a formatted number or date, else the shown text. */
+val XlsxCell.editableText: String
+    get() = if (type == CellType.NUMBER || type == CellType.DATE) rawValue ?: value else value
+
 private val ZeroPaddedNumber = Regex("[+-]?0[0-9]+.*")
 
 /** Type for plain text entered by the user or read from CSV; zero-padded codes such as ZIPs stay text. */
