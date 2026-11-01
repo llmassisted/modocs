@@ -7,8 +7,8 @@ If you're like me, you sometimes use your phone to look at docs, fill out forms,
 ## Features
 
 - **PDF** — View, search, fill supported form fields, place text/signatures/checkmarks/dates, reposition marks, save filled copies, and print while preserving original page content
-- **DOCX** — View Word documents, edit simple paragraphs with undo, save copies without rebuilding the whole document, export PDF, and print
-- **XLSX** — View merged cells and frozen headings, jump to cells, search, edit input cells with undo, and save copies while preserving worksheet metadata
+- **DOCX** — View Word documents with their pictures (including pictures in tables, headers and footers), edit simple paragraphs with undo, save copies without rebuilding the whole document, export PDF, and print
+- **XLSX** — View merged cells, frozen headings, and number formats (dates, times, percentages, currency), jump to cells, search, edit input cells with undo, and save copies while preserving worksheet metadata
 - **PPTX** — View presentations with text, shapes, images, and backgrounds
 - **CSV** — View comma-, semicolon-, tab-, or pipe-separated files in the spreadsheet grid with search, jump-to-cell, and zoom
 
@@ -40,8 +40,10 @@ Grab the latest APK from [Releases](https://github.com/llmassisted/modocs/releas
 ### DOCX
 - Documents won't show up exactly as in Word, especially with nested tables or unusual positioning. Headers/footers support basic default text; first/even-page variants and complex positioning remain limited.
 - Editing supports simple body paragraphs. Complex paragraphs remain read-only; unsupported XML is preserved in saved DOCX copies. PDF export/printing uses the lightweight renderer and can omit unsupported layout features.
+- Pictures appear on their own line after their paragraph's text; text does not wrap around floating pictures. EMF/WMF/TIFF pictures, charts and SmartArt show as labelled placeholders.
 
 ### XLSX
+- Fraction formats (`# ?/?`) display as General numbers.
 - Formulas are not evaluated: displayed results are cached and can be stale after input edits. Saved workbooks request recalculation in a spreadsheet app. Formula cells are read-only; saves reject edits within shared/array formula ranges.
 - Editing is limited to viewing and modifying cell values (no formatting changes, no inserting rows/columns)
 

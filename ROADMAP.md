@@ -20,8 +20,7 @@ and send back. Keep full office-suite editing out of the near-term scope.
    immediately on the page; support radio groups and richer choice fields.
 6. **Word fidelity.** First/even-page headers, per-section layouts, floating images,
    nested tables, footnotes, accurate fields/page numbers, and complex list overrides.
-7. **Spreadsheet usefulness.** Dates/currency/percent formats, filters and sort in a
-   temporary view, copy ranges, selectable column widths, and worksheet printing.
+7. **Spreadsheet usefulness.** Filters and sort in a temporary view, copy ranges, selectable column widths, and worksheet printing.
    Add formula evaluation only with clear support limits and recalculation tests.
 8. **Presentation basics.** Slide thumbnails, notes, placeholder indicators for
    unsupported content, and slide printing. Defer animations and SmartArt editing.
