@@ -1120,9 +1120,11 @@ object PptxParser {
                                 shapeY = parser.getAttributeValue(null, "y")?.toLongOrNull() ?: 0L
                             }
                         }
+                        // Extension-list entries (a:extLst/a:ext) share this name but carry no size.
                         "ext" -> {
-                            if (inSpPr && !inLn && !inTxBody) {
-                                shapeW = parser.getAttributeValue(null, "cx")?.toLongOrNull() ?: 0L
+                            val cx = parser.getAttributeValue(null, "cx")?.toLongOrNull()
+                            if (cx != null && inSpPr && !inLn && !inTxBody) {
+                                shapeW = cx
                                 shapeH = parser.getAttributeValue(null, "cy")?.toLongOrNull() ?: 0L
                             }
                         }
@@ -1247,8 +1249,9 @@ object PptxParser {
                             shapeX = parser.getAttributeValue(null, "x")?.toLongOrNull() ?: 0L
                             shapeY = parser.getAttributeValue(null, "y")?.toLongOrNull() ?: 0L
                         }
-                        "ext" -> {
-                            shapeW = parser.getAttributeValue(null, "cx")?.toLongOrNull() ?: 0L
+                        // Extension-list entries (a:extLst/a:ext) share this name but carry no size.
+                        "ext" -> parser.getAttributeValue(null, "cx")?.toLongOrNull()?.let { cx ->
+                            shapeW = cx
                             shapeH = parser.getAttributeValue(null, "cy")?.toLongOrNull() ?: 0L
                         }
                         "blip" -> {
@@ -1299,8 +1302,8 @@ object PptxParser {
                             shapeX = parser.getAttributeValue(null, "x")?.toLongOrNull() ?: 0L
                             shapeY = parser.getAttributeValue(null, "y")?.toLongOrNull() ?: 0L
                         }
-                        "ext" -> if (inSpPr) {
-                            shapeW = parser.getAttributeValue(null, "cx")?.toLongOrNull() ?: 0L
+                        "ext" -> if (inSpPr) parser.getAttributeValue(null, "cx")?.toLongOrNull()?.let { cx ->
+                            shapeW = cx
                             shapeH = parser.getAttributeValue(null, "cy")?.toLongOrNull() ?: 0L
                         }
                         "ln" -> if (inSpPr) {

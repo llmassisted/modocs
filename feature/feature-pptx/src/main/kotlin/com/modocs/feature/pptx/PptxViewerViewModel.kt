@@ -2,7 +2,6 @@ package com.modocs.feature.pptx
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -35,6 +34,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import com.modocs.core.common.OoxmlDecryptor
+import com.modocs.core.common.decodeSampledBitmap
 import com.modocs.core.common.documentErrorMessage
 import javax.inject.Inject
 
@@ -429,16 +429,12 @@ class PptxViewerViewModel @Inject constructor(
         scaleY: Float,
     ) {
         val imageData = images[shape.relationId] ?: return
-        val bitmap = try {
-            BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
-        } catch (_: Exception) {
-            return
-        } ?: return
-
         val left = shape.x * scaleX
         val top = shape.y * scaleY
         val width = shape.width * scaleX
         val height = shape.height * scaleY
+        // Decode only as many pixels as the picture covers on this slide.
+        val bitmap = decodeSampledBitmap(imageData, width.toInt()) ?: return
 
         canvas.save()
         if (shape.rotation != 0f) {
@@ -446,7 +442,7 @@ class PptxViewerViewModel @Inject constructor(
         }
 
         val destRect = RectF(left, top, left + width, top + height)
-        canvas.drawBitmap(bitmap, null, destRect, null)
+        canvas.drawBitmap(bitmap, null, destRect, Paint(Paint.FILTER_BITMAP_FLAG))
         bitmap.recycle()
 
         canvas.restore()
