@@ -5,14 +5,24 @@ import android.graphics.Typeface
 import android.text.*
 import android.text.style.StyleSpan
 
-/** Basic header/footer text, clipped to margins so it cannot obscure the body. */
+/** Basic header/footer text and pictures, clipped to margins so they cannot obscure the body. */
 fun drawPageStories(canvas: Canvas, document: DocxDocument) {
     val setup = document.pageSetup
-    fun draw(paragraphs: List<DocxParagraph>, top: Float, bottom: Float) {
-        if (paragraphs.isEmpty() || bottom <= top) return
+    // Canvas units are points; a PDF canvas reports its size in points too, so keep at least 2 px per point.
+    val pixelsPerPoint = maxOf(2f, canvas.width / setup.pageWidthPt)
+    fun draw(paragraphs: List<DocxParagraph>, images: List<DocxImage>, top: Float, bottom: Float) {
+        if ((paragraphs.isEmpty() && images.isEmpty()) || bottom <= top) return
         canvas.save()
         canvas.clipRect(setup.marginLeftPt, top, setup.pageWidthPt - setup.marginRightPt, bottom)
-        canvas.translate(setup.marginLeftPt, top)
+        // Pictures (usually a logo) sit at the top of the band at their own alignment; text follows below.
+        var picturesHeight = 0f
+        for (image in images) {
+            val bytes = document.images[image.partName]
+            val box = imageBox(image, bytes, setup.contentWidthPt, bottom - top)
+            drawDocxImage(canvas, image, bytes, imageLeft(image, box, setup.marginLeftPt, setup.contentWidthPt), top, box, pixelsPerPoint)
+            picturesHeight = maxOf(picturesHeight, box.height + 2f)
+        }
+        canvas.translate(setup.marginLeftPt, top + picturesHeight)
         for (paragraph in paragraphs) {
             val text = SpannableStringBuilder()
             for (run in paragraph.runs) {
@@ -37,6 +47,6 @@ fun drawPageStories(canvas: Canvas, document: DocxDocument) {
         }
         canvas.restore()
     }
-    draw(document.headerParagraphs, 12f, setup.marginTopPt - 6f)
-    draw(document.footerParagraphs, setup.pageHeightPt - setup.marginBottomPt + 6f, setup.pageHeightPt - 12f)
+    draw(document.headerParagraphs, document.headerImages, 12f, setup.marginTopPt - 6f)
+    draw(document.footerParagraphs, document.footerImages, setup.pageHeightPt - setup.marginBottomPt + 6f, setup.pageHeightPt - 12f)
 }
