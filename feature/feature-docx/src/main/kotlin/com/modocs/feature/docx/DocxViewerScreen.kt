@@ -462,6 +462,7 @@ private fun DocxPagesContent(
                     pageIndex = pageIndex,
                     highlights = viewModel.getHighlightsForPage(pageIndex),
                     highlightVersion = highlightVersion,
+                    contentVersion = state.formattingVersion,
                 )
             }
         }
@@ -474,6 +475,7 @@ private fun DocxPage(
     pageIndex: Int,
     highlights: List<DocxPageHighlight>,
     highlightVersion: Pair<Int, Int>,
+    contentVersion: Int,
 ) {
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
@@ -484,7 +486,8 @@ private fun DocxPage(
     }
     val renderWidth = (displayWidth * 2).coerceAtMost(3000)
 
-    val bitmap by produceState<Bitmap?>(null, pageIndex, renderWidth) {
+    // Re-render when the document changes under the page, e.g. after Undo.
+    val bitmap by produceState<Bitmap?>(null, pageIndex, renderWidth, contentVersion) {
         value = renderer.renderPage(pageIndex, renderWidth)
     }
 

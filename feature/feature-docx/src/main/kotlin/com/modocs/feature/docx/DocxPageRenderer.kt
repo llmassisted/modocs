@@ -317,7 +317,8 @@ class DocxPageRenderer(private val context: Context) {
                     // Evict oldest if cache full
                     if (pageCache.size >= MAX_CACHE_SIZE) {
                         val oldestKey = pageCache.keys.first()
-                        pageCache.remove(oldestKey)?.recycle()
+                        // Not recycled: a page on screen may still be drawing it; the GC frees it after.
+                        pageCache.remove(oldestKey)
                     }
                     pageCache[cacheKey] = bitmap
                     bitmap
@@ -329,7 +330,7 @@ class DocxPageRenderer(private val context: Context) {
     }
 
     fun invalidateCache() {
-        pageCache.values.forEach { it.recycle() }
+        // Pages on screen may still be drawing these bitmaps, so they are dropped, not recycled.
         pageCache.clear()
         // Also clear text segments so they get recomputed
         pages.forEach { it.textSegments = emptyList(); it.pageText = "" }
