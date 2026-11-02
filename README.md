@@ -132,6 +132,25 @@ cd modocs
 # APK will be at app/build/outputs/apk/debug/app-debug.apk
 ```
 
+## Releasing
+
+`.github/workflows/build-apk.yml` builds signed APKs on GitHub Actions:
+
+- **Pull requests** run the unit tests and attach a signed APK to the run (Actions → the run → Artifacts), ready to install on a phone. Pull requests from forks never receive secrets, so they build an unsigned debug APK only.
+- **Version tags** build the APK and create a draft release with it attached. Bump `versionCode`/`versionName` in `app/build.gradle.kts`, then push a tag matching `versionName` (`git tag v1.78 && git push origin v1.78`). Publishing the draft is what makes the in-app updater offer it.
+- **Manual runs** (Actions → Build APK → Run workflow) build a signed APK from any branch.
+
+One-time setup: add these repository secrets (Settings → Secrets and variables → Actions). Use the same keystore that signed the installed app; Android only installs an update signed with the same key.
+
+| Secret | Value |
+| --- | --- |
+| `MODOCS_RELEASE_KEYSTORE_BASE64` | The keystore file, base64-encoded: `base64 -w0 release.jks` (macOS: `base64 -i release.jks`) |
+| `MODOCS_RELEASE_STORE_PASSWORD` | Keystore password |
+| `MODOCS_RELEASE_KEY_ALIAS` | Key alias |
+| `MODOCS_RELEASE_KEY_PASSWORD` | Key password |
+
+With the GitHub CLI: `base64 -w0 release.jks | gh secret set MODOCS_RELEASE_KEYSTORE_BASE64`, then `gh secret set` for the other three.
+
 ## License
 
 [MIT](LICENSE)
