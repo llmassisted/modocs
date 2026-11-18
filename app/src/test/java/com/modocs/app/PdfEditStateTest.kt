@@ -7,7 +7,7 @@ import org.junit.Test
 
 class PdfEditStateTest {
     @Test fun editsAreComparedWithTheLastSavedCopyIncludingFormFields() {
-        val mark = CheckmarkAnnotation("mark", 0, .2f, .4f, true)
+        val mark = CheckmarkAnnotation("mark", 0, .2f, .4f, isCheck = true)
         val saved = FillSignState(annotations = listOf(mark), savedAnnotations = listOf(mark))
         assertFalse(saved.isDirty)
         assertTrue(saved.copy(annotations = emptyList()).isDirty)
