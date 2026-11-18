@@ -56,7 +56,6 @@ data class PdfViewerState(
     val activeUri: Uri? = null,
     val saveRevision: Int = 0,
     val formFields: List<PdfFormField> = emptyList(),
-    val formValues: Map<String, String> = emptyMap(),
     val formError: String? = null,
     val formsLoading: Boolean = false,
     val errorMessage: String? = null,
@@ -74,10 +73,13 @@ data class FillSignState(
     val editingAnnotationId: String? = null,
     val editingText: String = "",
     val isSaving: Boolean = false,
-    val isDirty: Boolean = false,
+    val formValues: Map<String, String> = emptyMap(),
+    val savedAnnotations: List<PdfAnnotation> = emptyList(),
+    val savedFormValues: Map<String, String> = emptyMap(),
     /** Currently selected annotation for moving/resizing. */
     val selectedAnnotationId: String? = null,
 ) {
+    val isDirty: Boolean get() = annotations != savedAnnotations || formValues != savedFormValues
     val hasAnnotations: Boolean get() = annotations.isNotEmpty()
     val selectedAnnotation: PdfAnnotation? get() = annotations.find { it.id == selectedAnnotationId }
 }
@@ -507,7 +509,6 @@ class PdfViewerViewModel @Inject constructor(
                     annotations = current.annotations + annotation,
                     editingAnnotationId = id,
                     editingText = "",
-                    isDirty = true,
                 )
             }
 
@@ -539,7 +540,6 @@ class PdfViewerViewModel @Inject constructor(
                 )
                 _fillSignState.value = current.copy(
                     annotations = current.annotations + annotation,
-                    isDirty = true,
                 )
             }
 
@@ -553,7 +553,6 @@ class PdfViewerViewModel @Inject constructor(
                 )
                 _fillSignState.value = current.copy(
                     annotations = current.annotations + annotation,
-                    isDirty = true,
                 )
             }
 
@@ -567,7 +566,6 @@ class PdfViewerViewModel @Inject constructor(
                 )
                 _fillSignState.value = current.copy(
                     annotations = current.annotations + annotation,
-                    isDirty = true,
                 )
             }
 
@@ -582,7 +580,6 @@ class PdfViewerViewModel @Inject constructor(
                 )
                 _fillSignState.value = current.copy(
                     annotations = current.annotations + annotation,
-                    isDirty = true,
                 )
             }
         }
@@ -644,7 +641,6 @@ class PdfViewerViewModel @Inject constructor(
         val current = _fillSignState.value
         _fillSignState.value = current.copy(
             annotations = current.annotations.filter { it.id != id },
-            isDirty = current.annotations.any { it.id == id },
         )
     }
 
@@ -666,7 +662,6 @@ class PdfViewerViewModel @Inject constructor(
                     is DateAnnotation -> ann.copy(x = newX, y = newY)
                 }
             },
-            isDirty = true,
         )
     }
 
@@ -689,7 +684,6 @@ class PdfViewerViewModel @Inject constructor(
                     }
                 }
             },
-            isDirty = true,
         )
     }
 
@@ -700,7 +694,6 @@ class PdfViewerViewModel @Inject constructor(
         _fillSignState.value = current.copy(
             annotations = current.annotations.dropLast(1),
             selectedAnnotationId = null,
-            isDirty = true,
         )
     }
 
@@ -717,6 +710,7 @@ class PdfViewerViewModel @Inject constructor(
         val srcUri = renderSourceUri ?: documentUri ?: return
         val pageCount = _state.value.pageCount
         val annotations = _fillSignState.value.annotations
+        val formValues = _fillSignState.value.formValues
 
         viewModelScope.launch {
             _fillSignState.value = _fillSignState.value.copy(isSaving = true)
@@ -727,11 +721,12 @@ class PdfViewerViewModel @Inject constructor(
                     outputUri = outputUri,
                     pageCount = pageCount,
                     annotations = annotations,
-                    formValues = _state.value.formValues,
+                    formValues = formValues,
                 )
                 _fillSignState.value = _fillSignState.value.copy(
                     isSaving = false,
-                    isDirty = false,
+                    savedAnnotations = annotations,
+                    savedFormValues = formValues,
                 )
                 _state.value = _state.value.copy(activeUri = outputUri,
                     fileName = resolveFileName(outputUri) ?: _state.value.fileName,
@@ -761,8 +756,10 @@ class PdfViewerViewModel @Inject constructor(
 
     fun updateFormValue(name: String, value: String) {
         if (_fillSignState.value.isSaving) return
-        _state.value = _state.value.copy(formValues = _state.value.formValues + (name to value))
-        _fillSignState.value = _fillSignState.value.copy(isDirty = true)
+        val current = _fillSignState.value
+        val original = _state.value.formFields.find { it.name == name }?.value
+        val values = if (value == original) current.formValues - name else current.formValues + (name to value)
+        _fillSignState.value = current.copy(formValues = values)
     }
 
     fun printDocument(activityContext: Context) {
@@ -773,7 +770,7 @@ class PdfViewerViewModel @Inject constructor(
             try {
                 val source = renderSourceUri ?: documentUri ?: error("No document open")
                 PdfDocumentWriter.save(context, source, Uri.fromFile(copy), _state.value.pageCount,
-                    _fillSignState.value.annotations, _state.value.formValues)
+                    _fillSignState.value.annotations, _fillSignState.value.formValues)
                 com.modocs.core.common.printPdf(activityContext, copy, _state.value.fileName)
             } catch (e: kotlinx.coroutines.CancellationException) { copy.delete(); throw e }
             catch (e: Exception) { copy.delete(); _events.emit(PdfEvent.SaveError("Could not print: ${e.message}")) }

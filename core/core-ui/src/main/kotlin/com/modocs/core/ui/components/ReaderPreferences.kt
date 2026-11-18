@@ -27,7 +27,7 @@ fun ReaderKeepAwake() {
 }
 
 @Composable
-fun RememberReadingPosition(document: String, list: LazyListState, ready: Boolean) {
+fun RememberReadingPosition(document: String, list: LazyListState, ready: Boolean, paged: Boolean = false) {
     ReaderKeepAwake()
     val context = LocalContext.current
     val store = remember(context) { AppPreferences.get(context) }
@@ -37,6 +37,7 @@ fun RememberReadingPosition(document: String, list: LazyListState, ready: Boolea
         val saved = store.position(document)
         val count = snapshotFlow { list.layoutInfo.totalItemsCount }.filter { it > 0 }.first()
         list.scrollToItem(saved.coerceIn(0, count - 1))
-        snapshotFlow { list.firstVisibleItemIndex }.distinctUntilChanged().collect { store.savePosition(document, it) }
+        snapshotFlow { if (paged) list.mostVisiblePage() else list.firstVisibleItemIndex }
+            .distinctUntilChanged().collect { store.savePosition(document, it) }
     }
 }

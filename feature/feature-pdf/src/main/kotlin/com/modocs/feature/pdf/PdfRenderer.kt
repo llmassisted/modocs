@@ -6,8 +6,6 @@ import android.graphics.pdf.PdfRenderer as AndroidPdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -25,9 +23,10 @@ class PdfRendererWrapper private constructor(
     private val renderer: AndroidPdfRenderer,
 ) : AutoCloseable {
 
-    val pageCount: Int get() = renderer.pageCount
+    val pageCount: Int = renderer.pageCount
 
-    private val mutex = Mutex()
+    private val lock = Any()
+    private var closed = false
 
     // LRU-style cache: pageIndex -> rendered bitmap
     private val pageCache = LinkedHashMap<CacheKey, Bitmap>(16, 0.75f, true)
@@ -43,11 +42,10 @@ class PdfRendererWrapper private constructor(
         if (pageIndex < 0 || pageIndex >= pageCount) return null
 
         val cacheKey = CacheKey(pageIndex, renderWidth)
-        pageCache[cacheKey]?.let { return it }
 
         return withContext(Dispatchers.IO) {
-            mutex.withLock {
-                // Double-check after acquiring lock
+            synchronized(lock) {
+                if (closed) return@withContext null
                 pageCache[cacheKey]?.let { return@withContext it }
 
                 try {
@@ -95,7 +93,8 @@ class PdfRendererWrapper private constructor(
     suspend fun getPageDimensions(pageIndex: Int): Pair<Int, Int>? {
         if (pageIndex < 0 || pageIndex >= pageCount) return null
         return withContext(Dispatchers.IO) {
-            mutex.withLock {
+            synchronized(lock) {
+                if (closed) return@withContext null
                 try {
                     renderer.openPage(pageIndex).use { page -> page.width to page.height }
                 } catch (e: Exception) {
@@ -105,8 +104,10 @@ class PdfRendererWrapper private constructor(
         }
     }
 
-    override fun close() {
-        pageCache.values.forEach { it.recycle() }
+    override fun close() = synchronized(lock) {
+        if (closed) return@synchronized
+        closed = true
+        // An outgoing page may still be drawing a cached bitmap.
         pageCache.clear()
         try { renderer.close() } catch (_: Exception) {}
         try { fileDescriptor.close() } catch (_: Exception) {}

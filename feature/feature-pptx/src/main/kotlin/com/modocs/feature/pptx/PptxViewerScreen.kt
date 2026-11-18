@@ -1,5 +1,6 @@
 package com.modocs.feature.pptx
 
+import com.modocs.core.ui.components.ReportDocumentOpened
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
@@ -75,8 +76,10 @@ fun PptxViewerScreen(
     displayName: String? = null,
     onNavigateBack: () -> Unit,
     viewModel: PptxViewerViewModel = hiltViewModel(),
+    onOpened: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    ReportDocumentOpened(uri, state.document != null, state.fileName, onOpened)
     com.modocs.core.ui.components.ReaderKeepAwake()
 
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()

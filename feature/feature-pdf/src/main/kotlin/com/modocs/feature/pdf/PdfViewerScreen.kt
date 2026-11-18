@@ -123,8 +123,11 @@ fun PdfViewerScreen(
     displayName: String?,
     onNavigateBack: () -> Unit,
     viewModel: PdfViewerViewModel = hiltViewModel(),
+    documentSwitch: DocumentSwitch? = null,
+    onOpened: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    ReportDocumentOpened(uri, state.pageCount > 0, state.fileName, onOpened)
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val fillSignState by viewModel.fillSignState.collectAsStateWithLifecycle()
 
@@ -134,7 +137,7 @@ fun PdfViewerScreen(
 
     val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.pdf" },
         "application/pdf", fillSignState.isDirty, fillSignState.isSaving, state.saveRevision,
-        viewModel::saveFilled, onNavigateBack)
+        viewModel::saveFilled, onNavigateBack, documentSwitch)
     var showForms by remember { mutableStateOf(false) }
     if (showForms) AlertDialog(onDismissRequest = { showForms = false },
         title = { Text("Fill form fields") },
@@ -144,7 +147,7 @@ fun PdfViewerScreen(
                 state.formError?.let { item { Text(it) } }
                 items(state.formFields.size) { index ->
                     val field = state.formFields[index]
-                    val value = state.formValues[field.name] ?: field.value
+                    val value = fillSignState.formValues[field.name] ?: field.value
                     if (field.checkbox) Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = value == "true", onCheckedChange = { viewModel.updateFormValue(field.name, it.toString()) })
                         Text(field.label)
@@ -180,7 +183,7 @@ fun PdfViewerScreen(
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
-    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.pageCount > 0)
+    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.pageCount > 0, paged = true)
 
     // Scroll to page when current search match changes
     LaunchedEffect(searchState.currentMatch) {
@@ -228,11 +231,7 @@ fun PdfViewerScreen(
                             style = MaterialTheme.typography.titleMedium,
                         )
                         if (state.pageCount > 0) {
-                            Text(
-                                text = "Page ${state.currentPage + 1} of ${state.pageCount}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            ReaderPageNumber(state.currentPage, state.pageCount, listState)
                         }
                     }
                 },
@@ -710,7 +709,7 @@ private fun PdfPagesContent(
     val renderer = viewModel.getRenderer() ?: return
 
     LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }
+        snapshotFlow { listState.mostVisiblePage() }
             .distinctUntilChanged()
             .collect { viewModel.updateCurrentPage(it) }
     }

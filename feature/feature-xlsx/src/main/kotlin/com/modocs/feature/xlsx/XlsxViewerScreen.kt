@@ -103,8 +103,11 @@ fun XlsxViewerScreen(
     onNavigateBack: () -> Unit,
     isCsv: Boolean = false,
     viewModel: XlsxViewerViewModel = hiltViewModel(),
+    documentSwitch: DocumentSwitch? = null,
+    onOpened: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    ReportDocumentOpened(uri, state.document != null, state.fileName, onOpened)
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val preferences = com.modocs.core.ui.components.rememberAppPreferences()
     var zoomScale by remember { mutableFloatStateOf(preferences.spreadsheetZoom) }
@@ -112,7 +115,7 @@ fun XlsxViewerScreen(
     val format = if (isCsv) DocumentType.CSV else DocumentType.XLSX
     val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.${format.name.lowercase()}" },
         format.mimeType, state.isDirty || state.draftDirty, state.isSaving, state.saveRevision,
-        viewModel::saveDocumentAs, onNavigateBack)
+        viewModel::saveDocumentAs, onNavigateBack, documentSwitch)
 
 
     // Collect events for snackbar

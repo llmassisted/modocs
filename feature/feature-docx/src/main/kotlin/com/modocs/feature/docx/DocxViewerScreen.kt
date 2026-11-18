@@ -113,8 +113,11 @@ fun DocxViewerScreen(
     onNavigateBack: () -> Unit,
     onExportPdf: ((Uri) -> Unit)? = null,
     viewModel: DocxViewerViewModel = hiltViewModel(),
+    documentSwitch: DocumentSwitch? = null,
+    onOpened: (String) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    ReportDocumentOpened(uri, state.document != null, state.fileName, onOpened)
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val autoPageBreaks by viewModel.autoPageBreaks.collectAsStateWithLifecycle()
     val formattingAtCursor by viewModel.formattingAtCursor.collectAsStateWithLifecycle()
@@ -124,7 +127,7 @@ fun DocxViewerScreen(
 
     val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.docx" },
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document", state.isDirty, state.isSaving, state.saveRevision,
-        viewModel::saveDocumentAs, onNavigateBack)
+        viewModel::saveDocumentAs, onNavigateBack, documentSwitch)
 
 
     // SAF launcher for "Save As PDF"
@@ -177,7 +180,7 @@ fun DocxViewerScreen(
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
-    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.viewMode == DocxViewMode.CANVAS && state.pageCount > 0)
+    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.viewMode == DocxViewMode.CANVAS && state.pageCount > 0, paged = true)
 
     // Scroll to match when current search match changes
     LaunchedEffect(searchState.currentMatch, state.viewMode) {
@@ -204,16 +207,12 @@ fun DocxViewerScreen(
                             style = MaterialTheme.typography.titleMedium,
                         )
                         if (state.document != null) {
-                            val subtitle = if (state.viewMode == DocxViewMode.CANVAS && state.pageCount > 0) {
-                                "Page ${state.currentPage + 1} of ${state.pageCount}"
+                            if (state.viewMode == DocxViewMode.CANVAS && state.pageCount > 0) {
+                                ReaderPageNumber(state.currentPage, state.pageCount, listState)
                             } else {
-                                "${state.document!!.body.size} elements"
+                                Text("${state.document!!.body.size} elements", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text(
-                                text = subtitle,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
                         }
                     }
                 },
@@ -436,7 +435,7 @@ private fun DocxPagesContent(
     val renderer = viewModel.getPageRenderer() ?: return
 
     LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }
+        snapshotFlow { listState.mostVisiblePage() }
             .distinctUntilChanged()
             .collect { viewModel.updateCurrentPage(it) }
     }
