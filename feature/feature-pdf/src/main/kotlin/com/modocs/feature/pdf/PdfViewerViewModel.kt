@@ -51,7 +51,6 @@ data class SearchState(
 data class PdfViewerState(
     val isLoading: Boolean = true,
     val pageCount: Int = 0,
-    val currentPage: Int = 0,
     val fileName: String = "",
     val activeUri: Uri? = null,
     val saveRevision: Int = 0,
@@ -213,10 +212,6 @@ class PdfViewerViewModel @Inject constructor(
             pageTexts = PdfTextExtractor.extractText(context, uri)
             _searchState.value = _searchState.value.copy(textExtracted = true)
         }
-    }
-
-    fun updateCurrentPage(page: Int) {
-        _state.value = _state.value.copy(currentPage = page)
     }
 
     /**
@@ -723,14 +718,14 @@ class PdfViewerViewModel @Inject constructor(
                     annotations = annotations,
                     formValues = formValues,
                 )
+                _state.value = _state.value.copy(activeUri = outputUri,
+                    fileName = resolveFileName(outputUri) ?: _state.value.fileName,
+                    saveRevision = _state.value.saveRevision + 1)
                 _fillSignState.value = _fillSignState.value.copy(
                     isSaving = false,
                     savedAnnotations = annotations,
                     savedFormValues = formValues,
                 )
-                _state.value = _state.value.copy(activeUri = outputUri,
-                    fileName = resolveFileName(outputUri) ?: _state.value.fileName,
-                    saveRevision = _state.value.saveRevision + 1)
                 _events.emit(PdfEvent.SaveSuccess(if (decryptedTempFile != null)
                     "Saved copy — this copy is not password-protected" else "PDF copy saved"))
             } catch (e: Exception) {

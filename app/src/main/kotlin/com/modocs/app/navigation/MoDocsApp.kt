@@ -150,6 +150,15 @@ fun MoDocsApp(
     val context = LocalContext.current
     val activity = context as? Activity
 
+    val navigateBack: () -> Unit = {
+        if (navController.previousBackStackEntry != null) {
+            navController.popBackStack()
+        } else {
+            // Leave the document (including any discarded edits) and keep a valid root on resume.
+            activity?.moveTaskToBack(true)
+            navController.navigate(Routes.FILES) { popUpTo(navController.graph.id) }
+        }
+    }
     val currentEntry by navController.currentBackStackEntryAsState()
     val switch = documentRequest?.let { request ->
         val route = requireNotNull(Routes.viewerForType(request.uri, request.type))
@@ -253,15 +262,9 @@ fun MoDocsApp(
             val uriString = backStackEntry.arguments?.getString("uri") ?: ""
             val name = backStackEntry.arguments?.getString("name") ?: ""
             val uri = Uri.parse(uriString)
-            val navigateBack = {
-                if (navController.previousBackStackEntry == null) activity?.finish()
-                else navController.popBackStack()
-                Unit
-            }
-
             BackHandler(onBack = navigateBack)
             PdfViewerScreen(
-                onOpened = { name -> onOpened(uri, name, DocumentType.PDF) },
+                onOpened = { openedUri, name -> onOpened(openedUri, name, DocumentType.PDF) },
                 documentSwitch = switch.takeIf { currentEntry == backStackEntry },
                 uri = uri,
                 displayName = name.ifEmpty { null },
@@ -283,15 +286,9 @@ fun MoDocsApp(
             val uriString = backStackEntry.arguments?.getString("uri") ?: ""
             val name = backStackEntry.arguments?.getString("name") ?: ""
             val uri = Uri.parse(uriString)
-            val navigateBack = {
-                if (navController.previousBackStackEntry == null) activity?.finish()
-                else navController.popBackStack()
-                Unit
-            }
-
             BackHandler(onBack = navigateBack)
             DocxViewerScreen(
-                onOpened = { name -> onOpened(uri, name, DocumentType.DOCX) },
+                onOpened = { openedUri, name -> onOpened(openedUri, name, DocumentType.DOCX) },
                 documentSwitch = switch.takeIf { currentEntry == backStackEntry },
                 uri = uri,
                 displayName = name.ifEmpty { null },
@@ -313,15 +310,9 @@ fun MoDocsApp(
             val uriString = backStackEntry.arguments?.getString("uri") ?: ""
             val name = backStackEntry.arguments?.getString("name") ?: ""
             val uri = Uri.parse(uriString)
-            val navigateBack = {
-                if (navController.previousBackStackEntry == null) activity?.finish()
-                else navController.popBackStack()
-                Unit
-            }
-
             BackHandler(onBack = navigateBack)
             XlsxViewerScreen(
-                onOpened = { name -> onOpened(uri, name, DocumentType.XLSX) },
+                onOpened = { openedUri, name -> onOpened(openedUri, name, DocumentType.XLSX) },
                 documentSwitch = switch.takeIf { currentEntry == backStackEntry },
                 uri = uri,
                 displayName = name.ifEmpty { null },
@@ -343,15 +334,9 @@ fun MoDocsApp(
             val uriString = backStackEntry.arguments?.getString("uri") ?: ""
             val name = backStackEntry.arguments?.getString("name") ?: ""
             val uri = Uri.parse(uriString)
-            val navigateBack = {
-                if (navController.previousBackStackEntry == null) activity?.finish()
-                else navController.popBackStack()
-                Unit
-            }
-
             BackHandler(onBack = navigateBack)
             PptxViewerScreen(
-                onOpened = { name -> onOpened(uri, name, DocumentType.PPTX) },
+                onOpened = { openedUri, name -> onOpened(openedUri, name, DocumentType.PPTX) },
                 uri = uri,
                 displayName = name.ifEmpty { null },
                 onNavigateBack = navigateBack,
@@ -372,15 +357,9 @@ fun MoDocsApp(
             val uriString = backStackEntry.arguments?.getString("uri") ?: ""
             val name = backStackEntry.arguments?.getString("name") ?: ""
             val uri = Uri.parse(uriString)
-            val navigateBack = {
-                if (navController.previousBackStackEntry == null) activity?.finish()
-                else navController.popBackStack()
-                Unit
-            }
-
             BackHandler(onBack = navigateBack)
             XlsxViewerScreen(
-                onOpened = { name -> onOpened(uri, name, DocumentType.CSV) },
+                onOpened = { openedUri, name -> onOpened(openedUri, name, DocumentType.CSV) },
                 documentSwitch = switch.takeIf { currentEntry == backStackEntry },
                 uri = uri,
                 displayName = name.ifEmpty { null },

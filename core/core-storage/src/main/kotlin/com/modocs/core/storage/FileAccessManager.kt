@@ -29,12 +29,16 @@ class FileAccessManager @Inject constructor(
         return context.contentResolver.getType(uri)
     }
 
-    fun persistPermission(uri: Uri) {
-        try {
+    /** True when a later launch can reopen this URI without the sender's temporary grant. */
+    fun persistPermission(uri: Uri): Boolean {
+        if (uri.scheme == "file") return uri.path?.let { java.io.File(it).canRead() } == true
+        if (uri.scheme != "content") return false
+        return try {
             context.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
+            true
         } catch (_: SecurityException) {
             // Read-only permission fallback
             try {
@@ -42,8 +46,9 @@ class FileAccessManager @Inject constructor(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
+                true
             } catch (_: SecurityException) {
-                // Permission not persistable, that's fine
+                context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
             }
         }
     }

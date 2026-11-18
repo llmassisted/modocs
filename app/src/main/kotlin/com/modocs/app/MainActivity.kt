@@ -58,8 +58,9 @@ class MainActivity : ComponentActivity() {
                 }, onOpened = { uri, name, type ->
                     if (AppPreferences.get(this).state.value.keepRecents) {
                         lifecycleScope.launch(Dispatchers.IO) {
-                            fileAccess.persistPermission(uri)
-                            recentFiles.addRecentFile(uri.toString(), name, type, null)
+                            if (fileAccess.persistPermission(uri)) {
+                                recentFiles.addRecentFile(uri.toString(), name, type, null)
+                            }
                         }
                     }
                 })

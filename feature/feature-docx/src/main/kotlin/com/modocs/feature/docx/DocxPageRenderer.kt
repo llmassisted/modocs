@@ -41,6 +41,7 @@ class DocxPageRenderer(private val context: Context) {
     private var pages: List<PageInfo> = emptyList()
     private var document: DocxDocument? = null
 
+    val pageAspectRatio: Float get() = PAGE_WIDTH / PAGE_HEIGHT
     val pageCount: Int get() = pages.size
 
     // LRU bitmap cache

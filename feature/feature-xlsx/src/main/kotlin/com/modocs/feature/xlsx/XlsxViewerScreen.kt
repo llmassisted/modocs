@@ -2,8 +2,6 @@ package com.modocs.feature.xlsx
 
 import android.app.Activity
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -104,10 +102,10 @@ fun XlsxViewerScreen(
     isCsv: Boolean = false,
     viewModel: XlsxViewerViewModel = hiltViewModel(),
     documentSwitch: DocumentSwitch? = null,
-    onOpened: (String) -> Unit = {},
+    onOpened: (Uri, String) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    ReportDocumentOpened(uri, state.document != null, state.fileName, onOpened)
+    ReportDocumentOpened(state.activeUri ?: uri, state.document != null, state.fileName, onOpened)
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val preferences = com.modocs.core.ui.components.rememberAppPreferences()
     var zoomScale by remember { mutableFloatStateOf(preferences.spreadsheetZoom) }
@@ -116,7 +114,6 @@ fun XlsxViewerScreen(
     val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.${format.name.lowercase()}" },
         format.mimeType, state.isDirty || state.draftDirty, state.isSaving, state.saveRevision,
         viewModel::saveDocumentAs, onNavigateBack, documentSwitch)
-
 
     // Collect events for snackbar
     LaunchedEffect(Unit) {
@@ -141,15 +138,6 @@ fun XlsxViewerScreen(
             isLoading = state.isLoading,
             errorMessage = state.passwordError,
         )
-    }
-
-    // Save-As launcher
-    val saveAsLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-    ) { outputUri ->
-        if (outputUri != null) {
-            viewModel.saveDocumentAs(outputUri)
-        }
     }
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()

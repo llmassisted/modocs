@@ -76,7 +76,7 @@ fun PptxViewerScreen(
     displayName: String? = null,
     onNavigateBack: () -> Unit,
     viewModel: PptxViewerViewModel = hiltViewModel(),
-    onOpened: (String) -> Unit = {},
+    onOpened: (Uri, String) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     ReportDocumentOpened(uri, state.document != null, state.fileName, onOpened)

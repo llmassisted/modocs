@@ -2,8 +2,6 @@ package com.modocs.feature.pdf
 
 import android.graphics.Bitmap
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -81,7 +79,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -109,7 +106,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 // Highlight colors
 private val HighlightYellow = Color(0x66FFEB3B)
@@ -124,10 +120,10 @@ fun PdfViewerScreen(
     onNavigateBack: () -> Unit,
     viewModel: PdfViewerViewModel = hiltViewModel(),
     documentSwitch: DocumentSwitch? = null,
-    onOpened: (String) -> Unit = {},
+    onOpened: (Uri, String) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    ReportDocumentOpened(uri, state.pageCount > 0, state.fileName, onOpened)
+    ReportDocumentOpened(state.activeUri ?: uri, state.pageCount > 0, state.fileName, onOpened)
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val fillSignState by viewModel.fillSignState.collectAsStateWithLifecycle()
 
@@ -165,7 +161,6 @@ fun PdfViewerScreen(
         },
         confirmButton = { TextButton(onClick = { showForms = false }) { Text("Done") } })
 
-
     LaunchedEffect(uri) {
         viewModel.loadPdf(uri, displayName)
     }
@@ -183,21 +178,13 @@ fun PdfViewerScreen(
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
-    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.pageCount > 0, paged = true)
+    val pages = rememberReaderPagePosition(listState)
+    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.pageCount > 0, pages = pages)
 
     // Scroll to page when current search match changes
     LaunchedEffect(searchState.currentMatch) {
         val match = searchState.currentMatch ?: return@LaunchedEffect
         listState.animateScrollToItem(match.pageIndex)
-    }
-
-    // Save-As launcher
-    val saveAsLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/pdf"),
-    ) { outputUri ->
-        if (outputUri != null) {
-            viewModel.saveFilled(outputUri)
-        }
     }
 
     // Password dialog
@@ -231,7 +218,7 @@ fun PdfViewerScreen(
                             style = MaterialTheme.typography.titleMedium,
                         )
                         if (state.pageCount > 0) {
-                            ReaderPageNumber(state.currentPage, state.pageCount, listState)
+                            ReaderPageNumber(pages, state.pageCount)
                         }
                     }
                 },
@@ -302,7 +289,7 @@ fun PdfViewerScreen(
                     onUndo = { viewModel.undoLastAnnotation() },
                     onSave = {
                         val name = state.fileName.removeSuffix(".pdf") + "_filled.pdf"
-                        saveAsLauncher.launch(name)
+                        documentActions.saveAs(name)
                     },
                     onNewSignature = { viewModel.showSignaturePad() },
                     onSizeChange = { delta ->
@@ -708,12 +695,6 @@ private fun PdfPagesContent(
 ) {
     val renderer = viewModel.getRenderer() ?: return
 
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.mostVisiblePage() }
-            .distinctUntilChanged()
-            .collect { viewModel.updateCurrentPage(it) }
-    }
-
     var isDraggingAnnotation by remember { mutableStateOf(false) }
 
     ZoomableContainer(
@@ -779,7 +760,8 @@ private fun PdfPage(
     }
     val renderWidth = (displayWidth * 2).coerceAtMost(3000)
 
-    val bitmap by produceState<Bitmap?>(null, pageIndex, renderWidth) {
+    val cached = remember(renderer, pageIndex, renderWidth) { renderer.cachedPage(pageIndex, renderWidth) }
+    val bitmap by produceState(cached, renderer, pageIndex, renderWidth) {
         value = renderer.renderPage(pageIndex, renderWidth)
     }
 
