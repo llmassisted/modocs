@@ -56,7 +56,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.modocs.core.common.decodeSampledBitmap
 import com.modocs.fonts.FontResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -602,8 +601,8 @@ private fun ImageRenderer(
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     val targetPx = with(LocalDensity.current) { minOf(declaredWidth ?: screenWidth, screenWidth).roundToPx() }
     // Decode off the main thread, no larger than the screen shows.
-    val decoded by produceState<Pair<ImageBitmap?, Boolean>>(null to false, image.partName, targetPx) {
-        value = withContext(Dispatchers.Default) { bytes?.let { decodeSampledBitmap(it, targetPx)?.asImageBitmap() } } to true
+    val decoded by produceState<Pair<ImageBitmap?, Boolean>>(null to false, bytes, image.crop, targetPx) {
+        value = withContext(Dispatchers.Default) { bytes?.let { decodePicture(it, image.crop, targetPx)?.asImageBitmap() } } to true
     }
     val (bitmap, finished) = decoded
     val aspect = when {

@@ -31,7 +31,7 @@ class DocumentRegressionTest {
     @Test fun docxEditsPreserveSectionsHeadersHyperlinksAndRunFormatting() {
         val original = asset("preservation.docx").use { DocxParser.parse(it) }
         val paragraph = original.body[0] as DocxParagraph
-        assertEquals("Preserved header", original.headerParagraphs.single().text)
+        assertEquals("Preserved header", original.header.filterIsInstance<DocxParagraph>().single().text)
         assertTrue(paragraph.safelyEditable)
         assertFalse((original.body[1] as DocxParagraph).safelyEditable)
         val body = original.body.toMutableList()

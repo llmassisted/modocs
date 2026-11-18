@@ -1,19 +1,64 @@
 package com.modocs.feature.docx
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import com.modocs.core.common.bitmapPixelSize
 import com.modocs.core.common.decodeSampledBitmap
+import java.io.IOException
+import kotlin.math.ceil
 
 private const val EMU_PER_POINT = 12700f
 private const val PLACEHOLDER_HEIGHT = 48f
 
 /** An image's laid-out size, in points. */
 internal data class ImageBox(val width: Float, val height: Float)
+
+private fun PictureCrop.bounds(width: Int, height: Int) = Rect(
+    ceil(width * left).toInt(), ceil(height * top).toInt(),
+    width - ceil(width * right).toInt(), height - ceil(height * bottom).toInt(),
+)
+
+/** Materialize only the visible pixels so the PDF encoder never receives the hidden area. */
+internal fun decodePicture(bytes: ByteArray, crop: PictureCrop, targetWidth: Int): Bitmap? {
+    if (crop == PictureCrop()) return decodeSampledBitmap(bytes, targetWidth)
+    val (width, height) = bitmapPixelSize(bytes) ?: return null
+    val region = crop.bounds(width, height)
+    if (region.isEmpty) return null
+    var sample = 1
+    while (region.width() / sample / 2 >= targetWidth.coerceAtLeast(1)) sample *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    return try {
+        @Suppress("DEPRECATION")
+        val decoder = try {
+            BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)
+        } catch (_: IOException) {
+            null
+        }
+        if (decoder != null) {
+            try {
+                decoder.decodeRegion(region, options)
+            } finally {
+                decoder.recycle()
+            }
+        } else {
+            // BitmapFactory supports additional formats, including GIF.
+            val full = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+            val visible = crop.bounds(full.width, full.height)
+            if (visible.isEmpty) return null
+            Bitmap.createBitmap(full, visible.left, visible.top, visible.width(), visible.height())
+        }
+    } catch (_: OutOfMemoryError) {
+        null
+    }
+}
 
 /**
  * The size [image] is laid out at, in points, no larger than [maxWidth] × [maxHeight].
@@ -27,9 +72,9 @@ internal fun imageBox(image: DocxImage, bytes: ByteArray?, maxWidth: Float, maxH
     var width = image.widthEmu / EMU_PER_POINT
     var height = image.heightEmu / EMU_PER_POINT
     if (width <= 0f || height <= 0f) {
-        val pixels = bytes?.let { bitmapPixelSize(it) }
-        width = pixels?.first?.times(0.75f) ?: maxWidth
-        height = pixels?.second?.times(0.75f) ?: PLACEHOLDER_HEIGHT
+        val pixels = bytes?.let { bitmapPixelSize(it) }?.let { (w, h) -> image.crop.bounds(w, h) }?.takeUnless { it.isEmpty }
+        width = pixels?.width()?.times(0.75f) ?: maxWidth
+        height = pixels?.height()?.times(0.75f) ?: PLACEHOLDER_HEIGHT
     }
     val scale = minOf(1f, maxWidth.coerceAtLeast(1f) / width, maxHeight.coerceAtLeast(1f) / height)
     return ImageBox(width * scale, height * scale)
@@ -56,7 +101,7 @@ internal fun drawDocxImage(
     left: Float, top: Float, box: ImageBox, pixelsPerPoint: Float,
 ) {
     val dest = RectF(left, top, left + box.width, top + box.height)
-    val bitmap = bytes?.let { decodeSampledBitmap(it, (box.width * pixelsPerPoint).toInt()) }
+    val bitmap = bytes?.let { decodePicture(it, image.crop, (box.width * pixelsPerPoint).toInt()) }
     if (bitmap != null) {
         canvas.drawBitmap(bitmap, null, dest, Paint(Paint.FILTER_BITMAP_FLAG))
         return

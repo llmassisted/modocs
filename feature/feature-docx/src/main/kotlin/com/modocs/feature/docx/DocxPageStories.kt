@@ -10,20 +10,24 @@ fun drawPageStories(canvas: Canvas, document: DocxDocument) {
     val setup = document.pageSetup
     // Canvas units are points; a PDF canvas reports its size in points too, so keep at least 2 px per point.
     val pixelsPerPoint = maxOf(2f, canvas.width / setup.pageWidthPt)
-    fun draw(paragraphs: List<DocxParagraph>, images: List<DocxImage>, top: Float, bottom: Float) {
-        if ((paragraphs.isEmpty() && images.isEmpty()) || bottom <= top) return
+    fun draw(elements: List<DocxElement>, top: Float, bottom: Float) {
+        if (elements.isEmpty() || bottom <= top) return
         canvas.save()
         canvas.clipRect(setup.marginLeftPt, top, setup.pageWidthPt - setup.marginRightPt, bottom)
-        // Pictures (usually a logo) sit at the top of the band at their own alignment; text follows below.
-        var picturesHeight = 0f
-        for (image in images) {
-            val bytes = document.images[image.partName]
-            val box = imageBox(image, bytes, setup.contentWidthPt, bottom - top)
-            drawDocxImage(canvas, image, bytes, imageLeft(image, box, setup.marginLeftPt, setup.contentWidthPt), top, box, pixelsPerPoint)
-            picturesHeight = maxOf(picturesHeight, box.height + 2f)
-        }
-        canvas.translate(setup.marginLeftPt, top + picturesHeight)
-        for (paragraph in paragraphs) {
+        canvas.translate(setup.marginLeftPt, top)
+        var remaining = bottom - top
+        for (element in elements) {
+            if (remaining <= 0f) break
+            if (element is DocxImage) {
+                val bytes = document.images[element.partName]
+                val box = imageBox(element, bytes, setup.contentWidthPt, remaining)
+                val left = imageLeft(element, box, 0f, setup.contentWidthPt)
+                drawDocxImage(canvas, element, bytes, left, 0f, box, pixelsPerPoint)
+                canvas.translate(0f, box.height + 2f)
+                remaining -= box.height + 2f
+                continue
+            }
+            val paragraph = element as? DocxParagraph ?: continue
             val text = SpannableStringBuilder()
             for (run in paragraph.runs) {
                 val start = text.length; text.append(run.text)
@@ -43,10 +47,12 @@ fun drawPageStories(canvas: Canvas, document: DocxDocument) {
             val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, setup.contentWidthPt.toInt().coerceAtLeast(1))
                 .setAlignment(alignment).setIncludePad(false).build()
             layout.draw(canvas)
-            canvas.translate(0f, layout.height + paragraph.properties.spacingAfterPt)
+            val advance = layout.height + paragraph.properties.spacingAfterPt
+            canvas.translate(0f, advance)
+            remaining -= advance
         }
         canvas.restore()
     }
-    draw(document.headerParagraphs, document.headerImages, 12f, setup.marginTopPt - 6f)
-    draw(document.footerParagraphs, document.footerImages, setup.pageHeightPt - setup.marginBottomPt + 6f, setup.pageHeightPt - 12f)
+    draw(document.header, 12f, setup.marginTopPt - 6f)
+    draw(document.footer, setup.pageHeightPt - setup.marginBottomPt + 6f, setup.pageHeightPt - 12f)
 }

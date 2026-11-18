@@ -354,8 +354,12 @@ class XlsxViewerViewModel @Inject constructor(
         val row = rows.find { it.rowIndex == rowIndex } ?: XlsxRow(rowIndex, mutableListOf()).also { rows.add(it) }
         val old = row.cells.find { it.columnIndex == colIndex }
         row.cells.removeAll { it.columnIndex == colIndex }
-        row.cells.add((old ?: XlsxCell(columnIndex = colIndex, value = "")).copy(value = newValue,
-            type = inferCellType(newValue), formula = null, rawValue = null))
+        val cell = (old ?: XlsxCell(columnIndex = colIndex, value = "")).copy(formula = null)
+        row.cells.add(if (inferCellType(newValue) == CellType.NUMBER) {
+            cell.withNumber(newValue, document.styles.getOrNull(cell.styleIndex), document.date1904)
+        } else {
+            cell.copy(value = newValue, type = CellType.STRING, rawValue = null)
+        })
         row.cells.sortBy { it.columnIndex }
         rows.sortBy { it.rowIndex }
         val sheets = document.sheets.toMutableList()

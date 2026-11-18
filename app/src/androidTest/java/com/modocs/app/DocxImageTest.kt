@@ -1,5 +1,12 @@
 package com.modocs.app
 
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.runBlocking
+import java.io.File
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.modocs.core.common.readZipEntriesCapped
 import com.modocs.feature.docx.*
@@ -64,6 +71,42 @@ class DocxImageTest {
         assertTrue(doc.warnings.isEmpty())
     }
 
+    @Test fun exportedHeadersStackPicturesAndExcludeCroppedPixels() = runBlocking {
+        val source = Bitmap.createBitmap(40, 20, Bitmap.Config.ARGB_8888)
+        for (y in 0 until source.height) for (x in 0 until source.width) {
+            source.setPixel(x, y, if (x < 20) Color.RED else Color.BLUE)
+        }
+        val bytes = ByteArrayOutputStream().also { source.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        fun cropped(edge: String) = inline("rId1", 254000, 254000)
+            .replace("</pic:blipFill>", """<a:srcRect $edge="50000"/></pic:blipFill>""")
+        val doc = parse(docx(mapOf(
+            "word/document.xml" to document("""<w:sectPr><w:headerReference w:type="default" r:id="hdr"/></w:sectPr>"""),
+            "word/_rels/document.xml.rels" to rels("hdr" to "header1.xml"),
+            "word/header1.xml" to """<w:hdr $namespaces><w:p><w:r>${cropped("l")}</w:r></w:p>
+                <w:p><w:r>${cropped("r")}</w:r></w:p></w:hdr>""",
+            "word/_rels/header1.xml.rels" to rels("rId1" to "media/logo.png"),
+            "word/media/logo.png" to bytes,
+        )))
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val pdf = File.createTempFile("cropped-headers", ".pdf", context.cacheDir)
+        try {
+            pdf.outputStream().use { DocxToPdfConverter(context).convert(doc, it) }
+            PdfRenderer(ParcelFileDescriptor.open(pdf, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
+                renderer.openPage(0).use { page ->
+                    val bitmap = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    for (x in listOf(75, 89)) {
+                        assertEquals("First logo contains only the right half", Color.BLUE, bitmap.getPixel(x, 20))
+                        assertEquals("Second logo contains only the left half", Color.RED, bitmap.getPixel(x, 42))
+                    }
+                }
+            }
+        } finally {
+            pdf.delete()
+        }
+        Unit
+    }
+
     @Test fun alternateContentAndTextBoxesAppearOnce() {
         val doc = parse(docx(mapOf(
             "word/document.xml" to document("""<w:p><w:r><mc:AlternateContent>
@@ -109,8 +152,8 @@ class DocxImageTest {
         assertEquals(listOf("Chart", ""), body.drop(1).map { it.altText.ifEmpty { it.partName } })
         assertEquals(listOf("word/media/cell.emf"), doc.body.filterIsInstance<DocxTable>().single().rows[0].cells[0].images.map { it.partName })
         // The header's rId1 is its own logo, not the body's rId1 (the header part itself).
-        assertEquals(listOf(DocxImage("word/media/logo.png", 1905000, 952500, "", ParagraphAlignment.RIGHT)), doc.headerImages)
-        assertEquals("ACME", doc.headerParagraphs.single().text)
+        assertEquals(listOf(DocxImage("word/media/logo.png", 1905000, 952500, "", ParagraphAlignment.RIGHT)), doc.header.filterIsInstance<DocxImage>())
+        assertEquals("ACME", doc.header.filterIsInstance<DocxParagraph>().single().text)
         assertEquals(2, doc.warnings.size)
         assertTrue(doc.warnings.any { "placeholders (2)" in it })
         assertTrue(doc.warnings.any { "such as EMF or WMF (1)" in it })

@@ -15,6 +15,7 @@ data class XlsxDocument(
     val modifiedSheets: MutableSet<Int> = mutableSetOf(),
     val editedCells: Map<Int, Set<Pair<Int, Int>>> = emptyMap(),
     val warnings: List<String> = emptyList(),
+    val date1904: Boolean = false,
 )
 
 data class XlsxSheet(
@@ -67,6 +68,17 @@ enum class CellType {
 /** What the editor starts from: the stored number behind a formatted number or date, else the shown text. */
 val XlsxCell.editableText: String
     get() = if (type == CellType.NUMBER || type == CellType.DATE) rawValue ?: value else value
+
+/** Apply the same numeric presentation when opening a sheet and when committing an edit. */
+internal fun XlsxCell.withNumber(raw: String, style: XlsxCellStyle?, date1904: Boolean): XlsxCell {
+    val id = style?.numberFormatId ?: 0
+    val code = style?.numberFormatCode
+    return copy(
+        rawValue = raw,
+        type = if (CellNumberFormat.isDateFormat(id, code)) CellType.DATE else CellType.NUMBER,
+        value = CellNumberFormat.format(raw, id, code, date1904),
+    )
+}
 
 private val ZeroPaddedNumber = Regex("[+-]?0[0-9]+.*")
 

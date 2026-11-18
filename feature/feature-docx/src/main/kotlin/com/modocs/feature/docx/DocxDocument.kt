@@ -45,10 +45,8 @@ data class DocxDocument(
     /** Page size and margins from section properties. */
     val pageSetup: PageSetup = PageSetup(),
     val originalBody: List<DocxElement> = body.toList(),
-    val headerParagraphs: List<DocxParagraph> = emptyList(),
-    val footerParagraphs: List<DocxParagraph> = emptyList(),
-    val headerImages: List<DocxImage> = emptyList(),
-    val footerImages: List<DocxImage> = emptyList(),
+    val header: List<DocxElement> = emptyList(),
+    val footer: List<DocxElement> = emptyList(),
     val warnings: List<String> = emptyList(),
 )
 
@@ -114,7 +112,11 @@ data class DocxImage(
     val altText: String = "",
     /** Horizontal placement; null follows the left margin. */
     val alignment: ParagraphAlignment? = null,
+    val crop: PictureCrop = PictureCrop(),
 ) : DocxElement
+
+/** Fractions trimmed from each edge of the embedded bitmap. */
+data class PictureCrop(val left: Double = 0.0, val top: Double = 0.0, val right: Double = 0.0, val bottom: Double = 0.0)
 
 // --- Run (inline text with formatting) ---
 

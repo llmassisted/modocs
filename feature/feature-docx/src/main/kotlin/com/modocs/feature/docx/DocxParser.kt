@@ -88,35 +88,36 @@ object DocxParser {
         }
         if (sections > 1) warnings.add("Multiple section layouts use the final section's page setup")
         // Headers and footers have their own relationship parts, so their pictures resolve separately.
-        fun story(kind: String, rootName: String): Pair<List<DocxParagraph>, List<DocxImage>> =
-            tolerate("$rootName content", emptyList<DocxParagraph>() to emptyList()) {
-                val id = storyIds[kind] ?: return@tolerate emptyList<DocxParagraph>() to emptyList()
+        fun story(kind: String, rootName: String): List<DocxElement> =
+            tolerate("$rootName content", emptyList()) {
+                val id = storyIds[kind] ?: return@tolerate emptyList()
                 val path = relationships[id] ?: error("Missing $rootName relationship")
                 val content = entries[path] ?: error("Missing $rootName content")
                 val storyRelationships = parseRelationships(entries, path)
-                val elements = parseDocumentBodyAndSetup(content, styles, storyRelationships, rootName).first
-                if (elements.any { it is DocxTable }) warnings.add("Complex $rootName content is simplified to text")
-                val paragraphs = elements.flatMap { element -> when (element) {
-                    is DocxParagraph -> listOf(element)
-                    is DocxTable -> element.rows.flatMap { it.cells.flatMap { cell -> cell.paragraphs } }
-                    is DocxImage -> emptyList()
-                } }
-                val images = elements.flatMap { element -> when (element) {
-                    is DocxImage -> listOf(element)
-                    is DocxTable -> element.rows.flatMap { it.cells.flatMap { cell -> cell.images } }
-                    is DocxParagraph -> emptyList()
-                } }
-                paragraphs to images
+                val elements = mutableListOf<DocxElement>()
+                val parser = createParser(content)
+                while (parser.next() != XmlPullParser.END_DOCUMENT) {
+                    if (parser.eventType != XmlPullParser.START_TAG || parser.namespace != NS_W) continue
+                    when (parser.name) {
+                        "tbl" -> warnings.add("Complex $rootName content is simplified to text and pictures")
+                        "p" -> {
+                            val (paragraph, images) = parseParagraph(parser, styles, storyRelationships)
+                            if (paragraph.text.isNotEmpty() || images.isEmpty()) elements.add(paragraph)
+                            elements.addAll(images)
+                        }
+                    }
+                }
+                elements
             }
-        val (header, headerImages) = story("headerReference", "hdr")
-        val (footer, footerImages) = story("footerReference", "ftr")
+        val header = story("headerReference", "hdr")
+        val footer = story("footerReference", "ftr")
 
         // Only pictures something refers to are kept, keyed by part so header and body ids cannot collide.
         val pictures = body.flatMap { element -> when (element) {
             is DocxImage -> listOf(element)
             is DocxTable -> element.rows.flatMap { it.cells.flatMap { cell -> cell.images } }
             is DocxParagraph -> emptyList()
-        } } + headerImages + footerImages
+        } } + header.filterIsInstance<DocxImage>() + footer.filterIsInstance<DocxImage>()
         val images = pictures.mapNotNull { picture -> entries[picture.partName]?.let { picture.partName to it } }.toMap()
         val missing = pictures.count { it.partName !in images }
         if (missing > 0) warnings.add("Linked or missing pictures, charts and diagrams are shown as placeholders ($missing)")
@@ -125,8 +126,7 @@ object DocxParser {
 
         return DocxDocument(
             body = resolveListLabels(DocxWriter.attachSources(body, documentXml), numbering).toMutableList(),
-            headerParagraphs = header, footerParagraphs = footer,
-            headerImages = headerImages, footerImages = footerImages,
+            header = header, footer = footer,
             styles = styles,
             numbering = numbering,
             images = images,
@@ -367,7 +367,6 @@ object DocxParser {
         bytes: ByteArray,
         styles: Map<String, DocxStyle>,
         relationships: Map<String, String>,
-        rootName: String = "body",
     ): Pair<List<DocxElement>, PageSetup> {
         val elements = mutableListOf<DocxElement>()
         var pageSetup = PageSetup()
@@ -376,7 +375,7 @@ object DocxParser {
         // Navigate to w:body
         var foundBody = false
         while (parser.next() != XmlPullParser.END_DOCUMENT) {
-            if (parser.eventType == XmlPullParser.START_TAG && parser.name == rootName) {
+            if (parser.eventType == XmlPullParser.START_TAG && parser.name == "body") {
                 foundBody = true
                 break
             }
@@ -886,7 +885,7 @@ object DocxParser {
     }
 
     /** One `pic:pic` or picture fill inside a drawing. */
-    private class Picture(val relId: String?, var widthEmu: Long = 0, var heightEmu: Long = 0)
+    private class Picture(val relId: String?, var widthEmu: Long = 0, var heightEmu: Long = 0, var crop: PictureCrop = PictureCrop())
 
     private fun parseDrawing(
         parser: XmlPullParser,
@@ -931,6 +930,14 @@ object DocxParser {
                             // r:link is a picture kept outside the file; it draws as a placeholder.
                             parser.getAttributeValue(NS_R, "embed")?.takeIf { it.isNotEmpty() },
                         ))
+                        "srcRect" -> pictures.lastOrNull()?.let { picture ->
+                            fun edge(name: String): Double {
+                                val value = parser.getAttributeValue(null, name) ?: return 0.0
+                                val scale = if (value.endsWith('%')) 100.0 else 100_000.0
+                                return ((value.removeSuffix("%").toDoubleOrNull() ?: 0.0) / scale).coerceIn(0.0, 1.0)
+                            }
+                            picture.crop = PictureCrop(edge("l"), edge("t"), edge("r"), edge("b"))
+                        }
                         // A picture's own size, needed when a group holds several.
                         "ext" -> pictures.lastOrNull()?.takeIf { it.widthEmu == 0L }?.let { picture ->
                             picture.widthEmu = parser.getAttributeValue(null, "cx")?.toLongOrNull() ?: 0
@@ -977,6 +984,7 @@ object DocxParser {
                 heightEmu = if (single) heightEmu else picture.heightEmu.takeIf { it > 0 } ?: heightEmu,
                 altText = altText,
                 alignment = alignment,
+                crop = picture.crop,
             ))
         }
     }
@@ -1009,8 +1017,14 @@ object DocxParser {
                             val declarations = style.split(';').associate {
                                 it.substringBefore(':').trim().lowercase() to it.substringAfter(':', "").trim()
                             }
+                            fun cropEdge(name: String): Double {
+                                val value = parser.getAttributeValue(null, name) ?: return 0.0
+                                val scale = if (value.endsWith('f')) 65536.0 else 1.0
+                                return ((value.removeSuffix("f").toDoubleOrNull() ?: 0.0) / scale).coerceIn(0.0, 1.0)
+                            }
                             images.add(DocxImage(
                                 partName = relId?.let { relationships[it] }.orEmpty(),
+                                crop = PictureCrop(cropEdge("cropleft"), cropEdge("croptop"), cropEdge("cropright"), cropEdge("cropbottom")),
                                 widthEmu = vmlLengthEmu(declarations["width"]),
                                 heightEmu = vmlLengthEmu(declarations["height"]),
                                 altText = parser.getAttributeValue(NS_O, "title").orEmpty(),

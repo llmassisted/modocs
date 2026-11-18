@@ -37,6 +37,19 @@ class CellNumberFormatTest {
         assertEquals("hello", f("hello", null, 4))
     }
 
+    @Test fun generalKeepsDistinctIntegerIdentifiers() {
+        for (id in listOf("12345678901", "12345678902", "123456789012345")) {
+            assertEquals(id, f(id, null, 0))
+        }
+    }
+
+    @Test fun localizedDatesKeepExcelsDayZeroAndLeapDay() {
+        assertEquals("1/0/1900", f("0", null, 14))
+        assertEquals("2/29/1900 12:00", f("60.5", null, 22))
+        Locale.setDefault(Locale.GERMANY)
+        assertEquals("29.02.1900", f("60", null, 14))
+    }
+
     @Test fun separatorsAndMonthNamesFollowTheDeviceLocale() {
         Locale.setDefault(Locale.GERMANY)
         assertEquals("1.234,50", f("1234.5", null, 4))

@@ -89,6 +89,7 @@ object XlsxParser {
             rawEntries = entries,
             warnings = if (warnings.isEmpty()) emptyList() else listOf("Opened ${sheets.size} of ${sheetInfos.size} sheets") + warnings,
             sheetPaths = sheetPathMap,
+            date1904 = date1904,
         )
     }
 
@@ -482,36 +483,19 @@ object XlsxParser {
                                 "inlineStr" -> CellType.INLINE_STRING
                                 "b" -> CellType.BOOLEAN
                                 "e" -> CellType.ERROR
-                                "n", "" -> {
-                                    // Check if number format suggests a date
-                                    val style = styles.getOrNull(currentCellStyle)
-                                    if (style != null && CellNumberFormat.isDateFormat(style.numberFormatId, style.numberFormatCode)) {
-                                        CellType.DATE
-                                    } else {
-                                        CellType.NUMBER
-                                    }
-                                }
+                                "n", "" -> CellType.NUMBER
                                 else -> CellType.STRING
                             }
-                            // Shown as the spreadsheet app shows it; the stored number stays in rawValue for editing.
-                            val displayValue = if (type == CellType.NUMBER || type == CellType.DATE) {
-                                val style = styles.getOrNull(currentCellStyle)
-                                CellNumberFormat.format(resolvedValue, style?.numberFormatId ?: 0, style?.numberFormatCode, date1904)
-                            } else {
-                                resolvedValue
-                            }
-                            currentCells.add(
-                                XlsxCell(
-                                    columnIndex = colIndex,
-                                    value = displayValue,
-                                    type = type,
-                                    styleIndex = currentCellStyle,
-                                    formula = currentFormula.toString().ifEmpty { null },
-                                    rawValue = rawValue.takeIf {
-                                        type == CellType.NUMBER || type == CellType.DATE
-                                    },
-                                )
+                            val cell = XlsxCell(
+                                columnIndex = colIndex,
+                                value = resolvedValue,
+                                type = type,
+                                styleIndex = currentCellStyle,
+                                formula = currentFormula.toString().ifEmpty { null },
                             )
+                            currentCells.add(if (type == CellType.NUMBER) {
+                                cell.withNumber(rawValue, styles.getOrNull(currentCellStyle), date1904)
+                            } else cell)
                             inCell = false
                         }
                         "row" -> if (inRow) {

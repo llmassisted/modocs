@@ -1,5 +1,11 @@
 package com.modocs.app
 
+import android.net.Uri
+import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import java.io.File
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.modocs.feature.xlsx.*
 import org.junit.After
@@ -39,6 +45,36 @@ class XlsxFormatTest {
         assertEquals(listOf(CellType.NUMBER, CellType.NUMBER, CellType.DATE, CellType.DATE, CellType.NUMBER), (0..4).map { sheet.cellAt(0, it)?.type })
         assertEquals("Editing a formatted number starts from its stored value", "0.25", sheet.cellAt(0, 0)?.editableText)
         assertEquals("1234.5", sheet.cellAt(0, 1)?.editableText)
+    }
+
+    @Test fun editedPercentAndMacDateKeepTheirFormatAcrossSave() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File.createTempFile("formatted", ".xlsx", context.cacheDir)
+        val output = File.createTempFile("edited", ".xlsx", context.cacheDir)
+        try {
+            source.writeBytes(xlsx(date1904 = true))
+            val vm = XlsxViewerViewModel(context)
+            instrumentation.runOnMainSync { vm.loadXlsx(Uri.fromFile(source), source.name) }
+            withTimeout(15000) { vm.state.first { it.document != null } }
+            instrumentation.runOnMainSync {
+                vm.updateCellValue(0, 0, "0.5")
+                vm.updateCellValue(0, 2, "1")
+            }
+            fun checkCells(sheet: XlsxSheet) {
+                assertEquals("50%", sheet.cellAt(0, 0)?.value)
+                assertEquals("0.5", sheet.cellAt(0, 0)?.editableText)
+                assertEquals("1/2/1904", sheet.cellAt(0, 2)?.value)
+                assertEquals("1", sheet.cellAt(0, 2)?.editableText)
+            }
+            checkCells(vm.state.value.document!!.sheets.single())
+            instrumentation.runOnMainSync { vm.saveDocumentAs(Uri.fromFile(output)) }
+            withTimeout(15000) { vm.state.first { it.saveRevision == 1 } }
+            checkCells(output.inputStream().use { XlsxParser.parse(it) }.sheets.single())
+        } finally {
+            source.delete()
+            output.delete()
+        }
     }
 
     @Test fun macWorkbooksCountDatesFrom1904() {

@@ -136,11 +136,11 @@ cd modocs
 
 `.github/workflows/build-apk.yml` builds signed APKs on GitHub Actions:
 
-- **Pull requests** run the unit tests and attach a signed APK to the run (Actions → the run → Artifacts), ready to install on a phone. Pull requests from forks never receive secrets, so they build an unsigned debug APK only.
-- **Version tags** build the APK and create a draft release with it attached. Bump `versionCode`/`versionName` in `app/build.gradle.kts`, then push a tag matching `versionName` (`git tag v1.78 && git push origin v1.78`). Publishing the draft is what makes the in-app updater offer it.
-- **Manual runs** (Actions → Build APK → Run workflow) build a signed APK from any branch.
+- **Pull requests and manual branch builds** run unit tests and attach a debug-signed APK under Actions → the run → Artifacts.
+- **Version tags** must match the app version (for example, `v1.78`). The build job produces an unsigned release APK. A separate job signs it, verifies the signature, and attaches it to a draft release. Publishing the draft makes the update available in the app.
+- **Manual runs on a version tag** attach the signed APK to the run.
 
-One-time setup: add these repository secrets (Settings → Secrets and variables → Actions). Use the same keystore that signed the installed app; Android only installs an update signed with the same key.
+Under Settings → Environments, configure a `release` environment with a deployment tag rule for `v*` and no branch rules. Restrict creation of release tags to release maintainers using a repository ruleset. Store the four secrets below **only in this environment**. If migrating from repository secrets, remove the repository-level copies after provisioning the environment. Use the same keystore that signed the installed app.
 
 | Secret | Value |
 | --- | --- |
@@ -149,7 +149,7 @@ One-time setup: add these repository secrets (Settings → Secrets and variables
 | `MODOCS_RELEASE_KEY_ALIAS` | Key alias |
 | `MODOCS_RELEASE_KEY_PASSWORD` | Key password |
 
-With the GitHub CLI: `base64 -w0 release.jks | gh secret set MODOCS_RELEASE_KEYSTORE_BASE64`, then `gh secret set` for the other three.
+With the GitHub CLI: `base64 -w0 release.jks | gh secret set --env release MODOCS_RELEASE_KEYSTORE_BASE64`, then `gh secret set --env release` for the other three.
 
 ## License
 

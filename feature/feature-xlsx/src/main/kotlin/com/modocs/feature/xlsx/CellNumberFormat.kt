@@ -1,7 +1,6 @@
 package com.modocs.feature.xlsx
 
 import java.math.BigDecimal
-import java.math.MathContext
 import java.math.RoundingMode
 import java.text.DecimalFormatSymbols
 import java.time.DayOfWeek
@@ -12,6 +11,9 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeFormatterBuilder
 import java.time.format.FormatStyle
 import java.time.format.TextStyle
+import java.time.temporal.ChronoField
+import java.time.temporal.TemporalAccessor
+import java.time.temporal.TemporalField
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.floor
@@ -65,17 +67,17 @@ object CellNumberFormat {
         }
     }
 
-    /** Excel's General: whole numbers as-is, others to 10 significant digits, very large or small ones in E notation. */
+    /** Preserve significant digits even when a large or small value needs scientific notation. */
     fun general(value: Double): String {
-        val magnitude = abs(value)
+        val decimal = BigDecimal.valueOf(value).stripTrailingZeros()
+        val exponent = decimal.precision() - decimal.scale() - 1
         val text = when {
-            magnitude == 0.0 -> "0"
-            magnitude >= 1e11 || magnitude < 1e-9 -> {
-                val exponent = floor(log10(magnitude)).toInt()
-                val mantissa = BigDecimal(value / 10.0.pow(exponent)).round(MathContext(6)).stripTrailingZeros().toPlainString()
+            decimal.scale() <= 0 && exponent < 15 -> decimal.toPlainString()
+            exponent >= 11 || exponent < -9 -> {
+                val mantissa = decimal.movePointLeft(exponent).toPlainString()
                 mantissa + "E" + (if (exponent < 0) "-" else "+") + abs(exponent).toString().padStart(2, '0')
             }
-            else -> BigDecimal.valueOf(value).round(MathContext(10)).stripTrailingZeros().toPlainString()
+            else -> decimal.toPlainString()
         }
         return text.replace('.', DecimalFormatSymbols.getInstance().decimalSeparator)
     }
@@ -294,8 +296,12 @@ object CellNumberFormat {
         val locale = Locale.getDefault()
         val pattern = DateTimeFormatterBuilder.getLocalizedDateTimePattern(FormatStyle.SHORT, null, IsoChronology.INSTANCE, locale)
             .replace(Regex("y+"), "yyyy")
-        val date = LocalDate.of(parts.year, parts.month, parts.day.coerceIn(1, 28)).let {
-            if (parts.day > 28) it.withDayOfMonth(parts.day.coerceAtMost(it.lengthOfMonth())) else it
+        // Excel includes day zero and 29 February 1900. Let the localized formatter
+        // arrange the fields, while supplying Excel's day even on those two dates.
+        val month = LocalDate.of(parts.year, parts.month, 1)
+        val date = object : TemporalAccessor by month {
+            override fun getLong(field: TemporalField): Long =
+                if (field == ChronoField.DAY_OF_MONTH) parts.day.toLong() else month.getLong(field)
         }
         val text = DateTimeFormatter.ofPattern(pattern, locale).format(date)
         return if (withTime) "$text ${parts.hour}:${parts.minute.toString().padStart(2, '0')}" else text

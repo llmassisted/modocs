@@ -1,8 +1,5 @@
 name: Build APK
 
-# Pull requests: unit tests plus a signed APK to install from the run's artifacts.
-# Version tags (v1.78): the same, then a draft release with the APK for the in-app updater.
-# Manual runs: a signed APK from any branch.
 on:
   pull_request:
   push:
@@ -20,11 +17,6 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    env:
-      # Forks and Dependabot never receive repository secrets; their pull requests get an unsigned debug build.
-      HAS_SIGNING_KEY: ${{ secrets.MODOCS_RELEASE_KEYSTORE_BASE64 != '' }}
-    outputs:
-      apk: ${{ steps.apk.outputs.name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,83 +51,69 @@ jobs:
             exit 1
           fi
 
-      - name: Require the signing key outside pull requests
-        if: env.HAS_SIGNING_KEY != 'true' && github.event_name != 'pull_request'
-        run: |
-          echo "::error::Add the MODOCS_RELEASE_* repository secrets (see README, Releasing) to build a signed APK."
-          exit 1
-
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest
 
-      - name: Build debug APK (no signing key available)
-        if: env.HAS_SIGNING_KEY != 'true'
+      - name: Build debug APK
+        if: github.event_name == 'pull_request' || github.ref_type != 'tag'
         run: ./gradlew :app:assembleDebug
 
-      - name: Decode signing key
-        if: env.HAS_SIGNING_KEY == 'true'
-        env:
-          KEYSTORE_BASE64: ${{ secrets.MODOCS_RELEASE_KEYSTORE_BASE64 }}
-        run: printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.event_name == 'pull_request' || github.ref_type != 'tag'
+        with:
+          path: app/build/outputs/apk/debug/app-debug.apk
+          archive: false
+          if-no-files-found: error
 
-      - name: Build signed release APK
-        if: env.HAS_SIGNING_KEY == 'true'
-        env:
-          MODOCS_RELEASE_STORE_FILE: ${{ runner.temp }}/release.jks
-          MODOCS_RELEASE_STORE_PASSWORD: ${{ secrets.MODOCS_RELEASE_STORE_PASSWORD }}
-          MODOCS_RELEASE_KEY_ALIAS: ${{ secrets.MODOCS_RELEASE_KEY_ALIAS }}
-          MODOCS_RELEASE_KEY_PASSWORD: ${{ secrets.MODOCS_RELEASE_KEY_PASSWORD }}
+      - name: Build unsigned release APK
+        if: github.ref_type == 'tag'
         run: ./gradlew :app:assembleRelease
 
-      - name: Remove signing key
-        if: always()
-        run: rm -f "$RUNNER_TEMP/release.jks"
-
-      - name: Verify the APK signature
-        id: apk
-        if: env.HAS_SIGNING_KEY == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.name }}
-          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          apk=app/build/outputs/apk/release/app-release.apk
-          # Without complete signing settings Gradle writes app-release-unsigned.apk, which cannot update an installed copy.
-          test -f "$apk" || { echo "::error::No signed APK was built. Check the MODOCS_RELEASE_* secrets."; exit 1; }
-          apksigner=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          "$apksigner" verify --print-certs "$apk" > certificate.txt
-          if [ "$GITHUB_REF_TYPE" = tag ]; then name="modocs-v$VERSION.apk"; else name="modocs-v$VERSION-${SHA:0:7}.apk"; fi
-          mv "$apk" "$name"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-          {
-            echo "### $name"
-            echo "Signed with certificate SHA-256 \`$(sed -n 's/.*SHA-256 digest: //p' certificate.txt | head -1)\`."
-            echo "An update installs only over a copy signed with the same certificate."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      # Uploaded as a plain .apk (not zipped) so it can be downloaded straight onto a phone.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: env.HAS_SIGNING_KEY == 'true'
+        if: github.ref_type == 'tag'
         with:
-          path: ${{ steps.apk.outputs.name }}
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
           archive: false
-          retention-days: 30
           if-no-files-found: error
 
   release:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-24.04
+    environment: release
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ needs.build.outputs.apk }}
+          name: app-release-unsigned.apk
 
-      # A draft, so release notes can be written before the in-app updater offers it; publishing it is the release.
+      - name: Sign and verify APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MODOCS_RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.MODOCS_RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MODOCS_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MODOCS_RELEASE_KEY_PASSWORD }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/release.jks"' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          apksigner=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:STORE_PASSWORD --key-pass env:KEY_PASSWORD \
+            --out "modocs-$TAG.apk" app-release-unsigned.apk
+          "$apksigner" verify --print-certs "modocs-$TAG.apk"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: modocs-${{ github.ref_name }}.apk
+          archive: false
+          if-no-files-found: error
+
       - name: Create draft release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-          APK: ${{ needs.build.outputs.apk }}
-        run: gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --generate-notes
+        run: gh release create "$TAG" "modocs-$TAG.apk" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --generate-notes
