@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Slideshow
@@ -111,7 +112,7 @@ fun HomeScreen(
                 OutlinedTextField(query, { query = it }, label = { Text("Find a document") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("All", "PDF", "DOCX", "XLSX", "PPTX").forEach { type ->
+                    listOf("All", "PDF", "DOCX", "XLSX", "PPTX", "CSV").forEach { type ->
                         FilterChip(selected = typeFilter == type, onClick = { typeFilter = type }, label = { Text(type) })
                     }
                 }
@@ -225,6 +226,7 @@ private fun DocumentType.icon(): ImageVector = when (this) {
     DocumentType.DOCX -> Icons.Default.Description
     DocumentType.XLSX -> Icons.Default.TableChart
     DocumentType.PPTX -> Icons.Default.Slideshow
+    DocumentType.CSV -> Icons.Default.GridOn
     DocumentType.UNKNOWN -> Icons.Default.GridView
 }
 
@@ -234,6 +236,7 @@ private fun DocumentType.iconTint() = when (this) {
     DocumentType.DOCX -> MaterialTheme.colorScheme.primary
     DocumentType.XLSX -> MaterialTheme.colorScheme.tertiary
     DocumentType.PPTX -> MaterialTheme.colorScheme.secondary
+    DocumentType.CSV -> MaterialTheme.colorScheme.tertiary
     DocumentType.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 

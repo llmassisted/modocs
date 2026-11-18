@@ -1,6 +1,5 @@
 package com.modocs.feature.docx
 
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -12,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -37,7 +38,10 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
@@ -53,6 +57,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.modocs.fonts.FontResolver
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Renders a single [DocxElement] as a Compose composable.
@@ -105,6 +111,7 @@ fun DocxElementRenderer(
         is DocxImage -> ImageRenderer(
             image = element,
             document = document,
+            pageScale = pageScale,
             modifier = modifier,
         )
     }
@@ -540,6 +547,9 @@ private fun TableRenderer(
                                     formattingVersion = 0,
                                 )
                             }
+                            for (image in cell.images) {
+                                ImageRenderer(image = image, document = document, pageScale = pageScale)
+                            }
                         }
                     }
                 }
@@ -582,44 +592,47 @@ private fun Modifier.drawCellBorders(
 private fun ImageRenderer(
     image: DocxImage,
     document: DocxDocument,
+    pageScale: Float,
     modifier: Modifier = Modifier,
 ) {
-    val imageBytes = document.images[image.relationId]
-    if (imageBytes == null) {
-        Box(
-            modifier = modifier
-                .fillMaxWidth()
-                .height(100.dp)
-                .background(Color(0xFFE0E0E0))
-                .padding(8.dp),
-        ) {
-            Text(
-                text = image.altText.ifEmpty { "[Image]" },
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.DarkGray,
+    val bytes = document.images[image.partName]
+    // Points scale like the page view's text, so pictures keep their size relative to it.
+    val declaredWidth = if (image.widthEmu > 0) (image.widthEmu / 12700f * pageScale).dp else null
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val targetPx = with(LocalDensity.current) { minOf(declaredWidth ?: screenWidth, screenWidth).roundToPx() }
+    // Decode off the main thread, no larger than the screen shows.
+    val decoded by produceState<Pair<ImageBitmap?, Boolean>>(null to false, bytes, image.crop, targetPx) {
+        value = withContext(Dispatchers.Default) { bytes?.let { decodePicture(it, image.crop, targetPx)?.asImageBitmap() } } to true
+    }
+    val (bitmap, finished) = decoded
+    val aspect = when {
+        image.widthEmu > 0 && image.heightEmu > 0 -> image.widthEmu.toFloat() / image.heightEmu
+        bitmap != null -> bitmap.width.toFloat() / bitmap.height
+        else -> 3f
+    }
+    val alignment = when (image.alignment) {
+        ParagraphAlignment.CENTER -> androidx.compose.ui.Alignment.Center
+        ParagraphAlignment.RIGHT -> androidx.compose.ui.Alignment.CenterEnd
+        else -> androidx.compose.ui.Alignment.CenterStart
+    }
+    Box(modifier = modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = alignment) {
+        val frame = Modifier.widthIn(max = declaredWidth ?: screenWidth).fillMaxWidth().aspectRatio(aspect)
+        when {
+            bitmap != null -> Image(
+                bitmap = bitmap,
+                contentDescription = image.altText.ifEmpty { "Document image" },
+                modifier = frame,
+                contentScale = ContentScale.Fit,
             )
+            // Reserve the picture's space while it decodes, so the page does not jump.
+            !finished -> Box(frame)
+            else -> Box(frame.background(Color(0xFFF1F1F1)).padding(8.dp)) {
+                Text(
+                    text = placeholderLabel(image, bytes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.DarkGray,
+                )
+            }
         }
-        return
-    }
-
-    val bitmap = remember(image.relationId) {
-        try {
-            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    if (bitmap != null) {
-        val widthDp = if (image.widthEmu > 0) DocxUnits.emuToDp(image.widthEmu).dp else 400.dp
-
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = image.altText.ifEmpty { "Document image" },
-            modifier = modifier
-                .widthIn(max = widthDp)
-                .padding(vertical = 4.dp),
-            contentScale = ContentScale.FillWidth,
-        )
     }
 }

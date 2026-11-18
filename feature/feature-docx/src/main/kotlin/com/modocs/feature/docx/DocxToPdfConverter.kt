@@ -1,7 +1,6 @@
 package com.modocs.feature.docx
 
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
@@ -26,6 +25,9 @@ class DocxToPdfConverter(private val context: Context) {
     private var CONTENT_WIDTH = PageLayoutCalculator.CONTENT_WIDTH
 
     private val layout = PageLayoutCalculator(context)
+
+    /** Exported pictures keep 144 dpi: sharp in print without bloating the file. */
+    private val PDF_PIXELS_PER_POINT = 2f
 
     /**
      * Mutable state for the current page being drawn.
@@ -307,7 +309,7 @@ class DocxToPdfConverter(private val context: Context) {
             for ((ci, cell) in row.cells.withIndex()) {
                 if (cell.vMerge == VMergeType.CONTINUE) continue
                 val cellW = positions[ci].second
-                maxH = maxOf(maxH, measureCellHeight(cell, cellW))
+                maxH = maxOf(maxH, measureCellHeight(cell, cellW, document))
             }
             maxH = maxOf(maxH, if (allContinue) 0f else 4f)
             if (maxH < 1f) continue
@@ -375,6 +377,12 @@ class DocxToPdfConverter(private val context: Context) {
                         ty += paint.textSize * 1.2f
                     }
                 }
+                for (image in cell.images) {
+                    val bytes = document.images[image.partName]
+                    val box = imageBox(image, bytes, cellWidth - 4f, contentHeight() / 2f)
+                    drawDocxImage(canvas, image, bytes, imageLeft(image, box, cx + 2f, cellWidth - 4f), ty + 2f, box, PDF_PIXELS_PER_POINT)
+                    ty += box.height + 4f
+                }
             }
 
             state.yPos += maxH
@@ -393,7 +401,7 @@ class DocxToPdfConverter(private val context: Context) {
         canvas.drawLine(x1, y1, x2, y2, paint)
     }
 
-    private fun measureCellHeight(cell: DocxTableCell, cellWidth: Float): Float {
+    private fun measureCellHeight(cell: DocxTableCell, cellWidth: Float, document: DocxDocument): Float {
         var h = 4f // 2pt top + 2pt bottom padding
         var hasContent = false
         for (para in cell.paragraphs) {
@@ -415,6 +423,10 @@ class DocxToPdfConverter(private val context: Context) {
                 h += lines * paint.textSize * 1.2f
             }
         }
+        for (image in cell.images) {
+            hasContent = true
+            h += imageBox(image, document.images[image.partName], cellWidth - 4f, contentHeight() / 2f).height + 4f
+        }
         return if (hasContent) maxOf(h, 14f) else 4f
     }
 
@@ -422,35 +434,20 @@ class DocxToPdfConverter(private val context: Context) {
 
     private fun drawImage(state: PdfState, image: DocxImage, document: DocxDocument) {
         if (state.canvas == null) return
-        val imageBytes = document.images[image.relationId] ?: return
+        val bytes = document.images[image.partName]
+        val box = imageBox(image, bytes, CONTENT_WIDTH, contentHeight() - 8f)
 
-        val bitmap = try {
-            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        } catch (_: Exception) { return } ?: return
-
-        val maxWidth = CONTENT_WIDTH
-        val widthPt = if (image.widthEmu > 0) {
-            (image.widthEmu / 914400f * 72f).coerceAtMost(maxWidth)
-        } else {
-            maxWidth.coerceAtMost(bitmap.width.toFloat())
-        }
-        val heightPt = bitmap.height * (widthPt / bitmap.width)
-
-        if (state.needsNewPage(heightPt + 8f)) {
+        if (state.needsNewPage(box.height + 8f)) {
             state.startNewPage()
         }
 
         val canvas = state.canvas ?: return
 
         state.yPos += 4f
-        val dest = android.graphics.Rect(
-            MARGIN_LEFT.toInt(), state.yPos.toInt(),
-            (MARGIN_LEFT + widthPt).toInt(), (state.yPos + heightPt).toInt(),
-        )
-        canvas.drawBitmap(bitmap, null, dest, null)
-        bitmap.recycle()
-
-        state.yPos += heightPt + 4f
+        drawDocxImage(canvas, image, bytes, imageLeft(image, box, MARGIN_LEFT, CONTENT_WIDTH), state.yPos, box, PDF_PIXELS_PER_POINT)
+        state.yPos += box.height + 4f
     }
+
+    private fun contentHeight() = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM
 
 }

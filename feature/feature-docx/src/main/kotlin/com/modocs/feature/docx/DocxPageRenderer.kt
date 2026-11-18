@@ -2,7 +2,6 @@ package com.modocs.feature.docx
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import kotlinx.coroutines.Dispatchers
@@ -110,7 +109,7 @@ class DocxPageRenderer(private val context: Context) {
 
             when (element) {
                 is DocxParagraph -> simParagraph(state, element, doc)
-                is DocxTable -> simTable(state, element)
+                is DocxTable -> simTable(state, element, doc)
                 is DocxImage -> simImage(state, element, doc)
             }
 
@@ -247,7 +246,7 @@ class DocxPageRenderer(private val context: Context) {
         state.yPos += paraProps.effectiveLineHeight(fontSize)
     }
 
-    private fun simTable(state: SimState, table: DocxTable) {
+    private fun simTable(state: SimState, table: DocxTable, document: DocxDocument) {
         state.yPos += 8f
         for (row in table.rows) {
             val allContinue = row.cells.all { it.vMerge == VMergeType.CONTINUE }
@@ -256,7 +255,7 @@ class DocxPageRenderer(private val context: Context) {
             for ((ci, cell) in row.cells.withIndex()) {
                 if (cell.vMerge == VMergeType.CONTINUE) continue
                 val cellW = positions[ci].second
-                val cellH = measureCellHeight(cell, cellW)
+                val cellH = measureCellHeight(cell, cellW, document)
                 maxH = maxOf(maxH, cellH)
             }
             maxH = maxOf(maxH, if (allContinue) 0f else 4f)
@@ -270,21 +269,14 @@ class DocxPageRenderer(private val context: Context) {
     }
 
     private fun simImage(state: SimState, image: DocxImage, document: DocxDocument) {
-        val widthPt = if (image.widthEmu > 0) {
-            (image.widthEmu / 914400f * 72f).coerceAtMost(CONTENT_WIDTH)
-        } else {
-            CONTENT_WIDTH
-        }
-        val heightPt = if (image.heightEmu > 0 && image.widthEmu > 0) {
-            image.heightEmu.toFloat() / image.widthEmu.toFloat() * widthPt
-        } else {
-            200f
-        }
-        if (state.needsNewPage(heightPt + 8f)) {
+        val box = imageBox(image, document.images[image.partName], CONTENT_WIDTH, contentHeight() - 8f)
+        if (state.needsNewPage(box.height + 8f)) {
             state.startNewPage()
         }
-        state.yPos += 4f + heightPt + 4f
+        state.yPos += 4f + box.height + 4f
     }
+
+    private fun contentHeight() = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM
 
     // ---------------------------------------------------------------
     // Pass 2: Bitmap rendering
@@ -325,7 +317,8 @@ class DocxPageRenderer(private val context: Context) {
                     // Evict oldest if cache full
                     if (pageCache.size >= MAX_CACHE_SIZE) {
                         val oldestKey = pageCache.keys.first()
-                        pageCache.remove(oldestKey)?.recycle()
+                        // Not recycled: a page on screen may still be drawing it; the GC frees it after.
+                        pageCache.remove(oldestKey)
                     }
                     pageCache[cacheKey] = bitmap
                     bitmap
@@ -337,7 +330,7 @@ class DocxPageRenderer(private val context: Context) {
     }
 
     fun invalidateCache() {
-        pageCache.values.forEach { it.recycle() }
+        // Pages on screen may still be drawing these bitmaps, so they are dropped, not recycled.
         pageCache.clear()
         // Also clear text segments so they get recomputed
         pages.forEach { it.textSegments = emptyList(); it.pageText = "" }
@@ -644,7 +637,7 @@ class DocxPageRenderer(private val context: Context) {
             for ((ci, cell) in row.cells.withIndex()) {
                 if (cell.vMerge == VMergeType.CONTINUE) continue
                 val cellW = positions[ci].second
-                val cellH = measureCellHeight(cell, cellW)
+                val cellH = measureCellHeight(cell, cellW, doc)
                 maxH = maxOf(maxH, cellH)
             }
             // Minimum height: 4pt for empty/continuation rows, 8pt for content rows
@@ -727,6 +720,12 @@ class DocxPageRenderer(private val context: Context) {
                             ty += paint.textSize * 1.2f
                         }
                     }
+                    for (image in cell.images) {
+                        val bytes = doc.images[image.partName]
+                        val box = imageBox(image, bytes, cellWidth - 4f, contentHeight() / 2f)
+                        drawDocxImage(canvas, image, bytes, imageLeft(image, box, cx + 2f, cellWidth - 4f), ty + 2f, box, canvas.width / PAGE_WIDTH)
+                        ty += box.height + 4f
+                    }
                 }
             }
 
@@ -747,7 +746,7 @@ class DocxPageRenderer(private val context: Context) {
         canvas.drawLine(x1, y1, x2, y2, paint)
     }
 
-    private fun measureCellHeight(cell: DocxTableCell, cellWidth: Float): Float {
+    private fun measureCellHeight(cell: DocxTableCell, cellWidth: Float, doc: DocxDocument): Float {
         var h = 4f // padding (2pt top + 2pt bottom)
         var hasContent = false
         for (para in cell.paragraphs) {
@@ -772,6 +771,10 @@ class DocxPageRenderer(private val context: Context) {
                 h += 4f // paragraph spacing
             }
         }
+        for (image in cell.images) {
+            hasContent = true
+            h += imageBox(image, doc.images[image.partName], cellWidth - 4f, contentHeight() / 2f).height + 4f
+        }
         return if (hasContent) maxOf(h, 16f) else 4f
     }
 
@@ -781,35 +784,22 @@ class DocxPageRenderer(private val context: Context) {
         doc: DocxDocument,
         targetPage: Int,
     ) {
-        val imageBytes = doc.images[image.relationId] ?: return
+        // Must advance exactly as simImage does, so every page draws the elements prepare() gave it.
+        val bytes = doc.images[image.partName]
+        val box = imageBox(image, bytes, CONTENT_WIDTH, contentHeight() - 8f)
 
-        val bitmap = try {
-            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        } catch (_: Exception) { return } ?: return
-
-        val maxWidth = CONTENT_WIDTH
-        val widthPt = if (image.widthEmu > 0) {
-            (image.widthEmu / 914400f * 72f).coerceAtMost(maxWidth)
-        } else {
-            maxWidth.coerceAtMost(bitmap.width.toFloat())
-        }
-        val heightPt = bitmap.height * (widthPt / bitmap.width)
-
-        if (state.needsNewPage(heightPt + 8f)) {
+        if (state.needsNewPage(box.height + 8f)) {
             state.startNewPage()
         }
 
         state.yPos += 4f
 
+        // Only pictures on this page are decoded; the replay passes over the rest.
         if (state.isOnPage(targetPage)) {
-            val dest = android.graphics.Rect(
-                MARGIN_LEFT.toInt(), state.yPos.toInt(),
-                (MARGIN_LEFT + widthPt).toInt(), (state.yPos + heightPt).toInt(),
-            )
-            state.canvas.drawBitmap(bitmap, null, dest, null)
+            val left = imageLeft(image, box, MARGIN_LEFT, CONTENT_WIDTH)
+            drawDocxImage(state.canvas, image, bytes, left, state.yPos, box, state.canvas.width / PAGE_WIDTH)
         }
 
-        bitmap.recycle()
-        state.yPos += heightPt + 4f
+        state.yPos += box.height + 4f
     }
 }

@@ -96,7 +96,7 @@ class PageLayoutCalculator(private val context: Context) {
 
             when (element) {
                 is DocxParagraph -> simParagraph(state, element, document)
-                is DocxTable -> simTable(state, element)
+                is DocxTable -> simTable(state, element, document)
                 is DocxImage -> simImage(state, element, document)
             }
 
@@ -268,7 +268,7 @@ class PageLayoutCalculator(private val context: Context) {
         return cells.mapIndexed { i, _ -> (activeMarginLeft + i * w) to w }
     }
 
-    private fun simTable(state: SimState, table: DocxTable) {
+    private fun simTable(state: SimState, table: DocxTable, document: DocxDocument) {
         state.yPos += 8f
 
         for (row in table.rows) {
@@ -281,7 +281,10 @@ class PageLayoutCalculator(private val context: Context) {
                 val cellW = positions[ci].second
                 val hasContent = cell.paragraphs.any { p -> p.runs.any { it.text.isNotBlank() } }
                 val lines = cell.paragraphs.sumOf { it.text.lines().size.coerceAtLeast(1) }
-                val cellH = if (hasContent) maxOf(lines * 14f + 8f, 16f) else 4f
+                val imagesH = cell.images.sumOf {
+                    imageBox(it, document.images[it.partName], cellW - 4f, contentHeight() / 2f).height + 4.0
+                }.toFloat()
+                val cellH = if (hasContent || cell.images.isNotEmpty()) maxOf(lines * 14f + 8f + imagesH, 16f) else 4f
                 maxH = maxOf(maxH, cellH)
             }
             maxH = maxOf(maxH, if (allContinue) 0f else 4f)
@@ -301,26 +304,16 @@ class PageLayoutCalculator(private val context: Context) {
      * Simulates image rendering. Mirrors DocxToPdfConverter.drawImage.
      */
     private fun simImage(state: SimState, image: DocxImage, document: DocxDocument) {
-        val imageBytes = document.images[image.relationId] ?: return
+        val box = imageBox(image, document.images[image.partName], activeContentWidth, contentHeight() - 8f)
 
-        // We can't decode the bitmap here without overhead, so estimate from EMU
-        val widthPt = if (image.widthEmu > 0) {
-            (image.widthEmu / 914400f * 72f).coerceAtMost(CONTENT_WIDTH)
-        } else {
-            CONTENT_WIDTH
-        }
-        val heightPt = if (image.heightEmu > 0 && image.widthEmu > 0) {
-            image.heightEmu.toFloat() / image.widthEmu.toFloat() * widthPt
-        } else {
-            200f
-        }
-
-        if (state.needsNewPage(heightPt + 8f)) {
+        if (state.needsNewPage(box.height + 8f)) {
             state.startNewPage()
         }
 
-        state.yPos += 4f + heightPt + 4f
+        state.yPos += 4f + box.height + 4f
     }
+
+    private fun contentHeight() = activePageHeight - activeMarginTop - activeMarginBottom
 
     // --- Shared helpers (used by both calculator and converter) ---
 

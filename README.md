@@ -7,9 +7,10 @@ If you're like me, you sometimes use your phone to look at docs, fill out forms,
 ## Features
 
 - **PDF** — View, search, fill supported form fields, place text/signatures/checkmarks/dates, reposition marks, save filled copies, and print while preserving original page content
-- **DOCX** — View Word documents, edit simple paragraphs with undo, save copies without rebuilding the whole document, export PDF, and print
-- **XLSX** — View merged cells and frozen headings, jump to cells, search, edit input cells with undo, and save copies while preserving worksheet metadata
+- **DOCX** — View Word documents with their pictures (including pictures in tables, headers and footers), edit simple paragraphs with undo, save copies without rebuilding the whole document, export PDF, and print
+- **XLSX** — View merged cells, frozen headings, and number formats (dates, times, percentages, currency), jump to cells, search, edit input cells with undo, and save copies while preserving worksheet metadata
 - **PPTX** — View presentations with text, shapes, images, and backgrounds
+- **CSV** — View comma-, semicolon-, tab-, or pipe-separated files in the spreadsheet grid with search, jump-to-cell, and zoom
 
 Recent files can be searched and filtered by format. Viewer save actions create a copy;
 after saving, sharing sends that copy. Pending edits trigger a save-and-share prompt,
@@ -39,8 +40,10 @@ Grab the latest APK from [Releases](https://github.com/llmassisted/modocs/releas
 ### DOCX
 - Documents won't show up exactly as in Word, especially with nested tables or unusual positioning. Headers/footers support basic default text; first/even-page variants and complex positioning remain limited.
 - Editing supports simple body paragraphs. Complex paragraphs remain read-only; unsupported XML is preserved in saved DOCX copies. PDF export/printing uses the lightweight renderer and can omit unsupported layout features.
+- Pictures appear on their own line after their paragraph's text; text does not wrap around floating pictures. EMF/WMF/TIFF pictures, charts and SmartArt show as labelled placeholders.
 
 ### XLSX
+- Fraction formats (`# ?/?`) display as General numbers.
 - Formulas are not evaluated: displayed results are cached and can be stale after input edits. Saved workbooks request recalculation in a spreadsheet app. Formula cells are read-only; saves reject edits within shared/array formula ranges.
 - Editing is limited to viewing and modifying cell values (no formatting changes, no inserting rows/columns)
 
@@ -49,6 +52,11 @@ Grab the latest APK from [Releases](https://github.com/llmassisted/modocs/releas
 - Complex graphics, SmartArt, charts, and animations will not render
 - No editing support for presentations — just viewing
 - If you need to do a lot of presentation editing on mobile, just get Microsoft Office
+
+### CSV
+- Read-only — open the file in a spreadsheet app to edit it
+- Values are shown exactly as written: no formulas, and no date or number formatting
+- Files over 500,000 cells show their first rows, with a notice, to stay within phone memory
 
 ### PDF
 - Fill & sign appends transparent image overlays for new marks; original page streams, text, links, crop boxes, and dimensions are preserved. Added marks are not searchable text or cryptographic signatures.
@@ -100,6 +108,7 @@ PRs welcome for any of these.
 
 A synthetic regression corpus lives in `app/src/androidTest/assets/`. Tests verify
 DOCX XML preservation, XLSX metadata/formula preservation, PDF dimensions/rotation/text/forms,
+CSV quoting/encodings/delimiters,
 saved-copy tracking, draft commits, undo, XML rejection, and preference persistence.
 
 ```bash
@@ -122,6 +131,25 @@ cd modocs
 
 # APK will be at app/build/outputs/apk/debug/app-debug.apk
 ```
+
+## Releasing
+
+`.github/workflows/build-apk.yml` builds signed APKs on GitHub Actions:
+
+- **Pull requests and manual branch builds** run unit tests and attach a debug-signed APK under Actions → the run → Artifacts.
+- **Version tags** must match the app version (for example, `v1.78`). The build job produces an unsigned release APK. A separate job signs it, verifies the signature, and attaches it to a draft release. Publishing the draft makes the update available in the app.
+- **Manual runs on a version tag** attach the signed APK to the run.
+
+Under Settings → Environments, configure a `release` environment with a deployment tag rule for `v*` and no branch rules. Restrict creation of release tags to release maintainers using a repository ruleset. Store the four secrets below **only in this environment**. If migrating from repository secrets, remove the repository-level copies after provisioning the environment. Use the same keystore that signed the installed app.
+
+| Secret | Value |
+| --- | --- |
+| `MODOCS_RELEASE_KEYSTORE_BASE64` | The keystore file, base64-encoded: `base64 -w0 release.jks` (macOS: `base64 -i release.jks`) |
+| `MODOCS_RELEASE_STORE_PASSWORD` | Keystore password |
+| `MODOCS_RELEASE_KEY_ALIAS` | Key alias |
+| `MODOCS_RELEASE_KEY_PASSWORD` | Key password |
+
+With the GitHub CLI: `base64 -w0 release.jks | gh secret set --env release MODOCS_RELEASE_KEYSTORE_BASE64`, then `gh secret set --env release` for the other three.
 
 ## License
 

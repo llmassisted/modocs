@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.modocs.core.common.DocumentType
 import com.modocs.core.ui.components.ErrorMessage
 import com.modocs.core.ui.components.LoadingIndicator
 import com.modocs.core.ui.components.*
@@ -100,6 +101,7 @@ fun XlsxViewerScreen(
     uri: Uri,
     displayName: String? = null,
     onNavigateBack: () -> Unit,
+    isCsv: Boolean = false,
     viewModel: XlsxViewerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -107,8 +109,9 @@ fun XlsxViewerScreen(
     val preferences = com.modocs.core.ui.components.rememberAppPreferences()
     var zoomScale by remember { mutableFloatStateOf(preferences.spreadsheetZoom) }
     val snackbarHostState = remember { SnackbarHostState() }
-    val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.xlsx" },
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", state.isDirty || state.draftDirty, state.isSaving, state.saveRevision,
+    val format = if (isCsv) DocumentType.CSV else DocumentType.XLSX
+    val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.${format.name.lowercase()}" },
+        format.mimeType, state.isDirty || state.draftDirty, state.isSaving, state.saveRevision,
         viewModel::saveDocumentAs, onNavigateBack)
 
 
@@ -124,7 +127,7 @@ fun XlsxViewerScreen(
     }
 
     LaunchedEffect(uri) {
-        viewModel.loadXlsx(uri, displayName)
+        viewModel.loadXlsx(uri, displayName, isCsv)
     }
 
     // Password dialog
@@ -171,7 +174,7 @@ fun XlsxViewerScreen(
                             Icon(Icons.Filled.Search, contentDescription = "Search")
                         }
                         // Edit toggle
-                        if (state.document != null) {
+                        if (state.document != null && !state.isReadOnly) {
                             IconButton(onClick = { viewModel.toggleEditMode() }, enabled = !state.isSaving) {
                                 Icon(
                                     if (state.isEditing) Icons.Filled.Close else Icons.Filled.Edit,

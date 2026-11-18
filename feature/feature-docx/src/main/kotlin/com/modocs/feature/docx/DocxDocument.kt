@@ -38,14 +38,15 @@ data class DocxDocument(
     val body: MutableList<DocxElement>,
     val styles: Map<String, DocxStyle> = emptyMap(),
     val numbering: Map<String, NumberingDefinition> = emptyMap(),
+    /** Picture bytes keyed by ZIP part name, e.g. "word/media/image1.png". */
     val images: Map<String, ByteArray> = emptyMap(),
     /** Raw ZIP entries for round-trip save (preserves unmodified content). */
     val rawEntries: Map<String, ByteArray> = emptyMap(),
     /** Page size and margins from section properties. */
     val pageSetup: PageSetup = PageSetup(),
     val originalBody: List<DocxElement> = body.toList(),
-    val headerParagraphs: List<DocxParagraph> = emptyList(),
-    val footerParagraphs: List<DocxParagraph> = emptyList(),
+    val header: List<DocxElement> = emptyList(),
+    val footer: List<DocxElement> = emptyList(),
     val warnings: List<String> = emptyList(),
 )
 
@@ -83,6 +84,8 @@ data class DocxTableCell(
     val vMerge: VMergeType = VMergeType.NONE,
     val shading: Int? = null,
     val borders: CellBorders? = null,
+    /** Pictures in the cell, shown after its text. */
+    val images: List<DocxImage> = emptyList(),
 )
 
 /** Per-side border definition for a table cell. null = inherit from table default. */
@@ -102,11 +105,18 @@ data class CellBorder(
 enum class VMergeType { NONE, RESTART, CONTINUE }
 
 data class DocxImage(
-    val relationId: String,
+    /** ZIP part holding the picture, or "" for a linked or missing picture, chart or diagram (drawn as a placeholder). */
+    val partName: String,
     val widthEmu: Long = 0,
     val heightEmu: Long = 0,
     val altText: String = "",
+    /** Horizontal placement; null follows the left margin. */
+    val alignment: ParagraphAlignment? = null,
+    val crop: PictureCrop = PictureCrop(),
 ) : DocxElement
+
+/** Fractions trimmed from each edge of the embedded bitmap. */
+data class PictureCrop(val left: Double = 0.0, val top: Double = 0.0, val right: Double = 0.0, val bottom: Double = 0.0)
 
 // --- Run (inline text with formatting) ---
 

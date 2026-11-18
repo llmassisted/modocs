@@ -51,30 +51,33 @@ class PdfRendererWrapper private constructor(
                 pageCache[cacheKey]?.let { return@withContext it }
 
                 try {
-                    val page = renderer.openPage(pageIndex)
-                    val aspectRatio = page.height.toFloat() / page.width.toFloat()
-                    val renderHeight = (renderWidth * aspectRatio).toInt()
+                    // A page left open makes every later openPage() fail, so close it even if rendering throws.
+                    val bitmap = renderer.openPage(pageIndex).use { page ->
+                        val aspectRatio = page.height.toFloat() / page.width.toFloat()
+                        val renderHeight = (renderWidth * aspectRatio).toInt()
 
-                    val bitmap = Bitmap.createBitmap(
-                        renderWidth,
-                        renderHeight,
-                        Bitmap.Config.ARGB_8888,
-                    )
-                    // White background
-                    bitmap.eraseColor(android.graphics.Color.WHITE)
+                        val bitmap = Bitmap.createBitmap(
+                            renderWidth,
+                            renderHeight,
+                            Bitmap.Config.ARGB_8888,
+                        )
+                        // White background
+                        bitmap.eraseColor(android.graphics.Color.WHITE)
 
-                    page.render(
-                        bitmap,
-                        null,
-                        null,
-                        AndroidPdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
-                    )
-                    page.close()
+                        page.render(
+                            bitmap,
+                            null,
+                            null,
+                            AndroidPdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                        )
+                        bitmap
+                    }
 
-                    // Evict oldest if cache full
+                    // Evict oldest if cache full. Not recycled: a page on screen may still be drawing it,
+                    // and the garbage collector frees bitmap memory once nothing does.
                     if (pageCache.size >= maxCacheSize) {
                         val oldestKey = pageCache.keys.first()
-                        pageCache.remove(oldestKey)?.recycle()
+                        pageCache.remove(oldestKey)
                     }
                     pageCache[cacheKey] = bitmap
 
@@ -94,10 +97,7 @@ class PdfRendererWrapper private constructor(
         return withContext(Dispatchers.IO) {
             mutex.withLock {
                 try {
-                    val page = renderer.openPage(pageIndex)
-                    val dims = page.width to page.height
-                    page.close()
-                    dims
+                    renderer.openPage(pageIndex).use { page -> page.width to page.height }
                 } catch (e: Exception) {
                     null
                 }

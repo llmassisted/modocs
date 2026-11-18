@@ -61,6 +61,9 @@ object XlsxParser {
         val sheetInfos = tolerate("workbook", emptyList<SheetInfo>()) {
             entries["xl/workbook.xml"]?.let { parseWorkbook(it) } ?: emptyList()
         }.ifEmpty { discoverSheets(entries) }
+        val date1904 = tolerate("workbook properties", false) {
+            entries["xl/workbook.xml"]?.let { usesDate1904(it) } ?: false
+        }
 
         // Step 6: Parse each sheet, tracking ZIP paths. A sheet that fails to
         // parse is skipped rather than aborting the workbook.
@@ -73,7 +76,7 @@ object XlsxParser {
             val sheetBytes = entries[sheetPath]
             if (sheetBytes == null) { warnings.add("Missing sheet: ${info.name}"); continue }
             val sheet = tolerate<XlsxSheet?>("sheet '${info.name}'", null) {
-                parseSheet(info.name, sheetBytes, sharedStrings, styles)
+                parseSheet(info.name, sheetBytes, sharedStrings, styles, date1904)
             } ?: continue
             sheets.add(sheet)
             sheetPathMap[sheetIndex] = sheetPath
@@ -86,6 +89,7 @@ object XlsxParser {
             rawEntries = entries,
             warnings = if (warnings.isEmpty()) emptyList() else listOf("Opened ${sheets.size} of ${sheetInfos.size} sheets") + warnings,
             sheetPaths = sheetPathMap,
+            date1904 = date1904,
         )
     }
 
@@ -356,6 +360,17 @@ object XlsxParser {
         return sheets
     }
 
+    /** Workbooks first made on a Mac may count dates from 1904 instead of 1900. */
+    private fun usesDate1904(bytes: ByteArray): Boolean {
+        val parser = createParser(bytes)
+        while (parser.next() != XmlPullParser.END_DOCUMENT) {
+            if (parser.eventType != XmlPullParser.START_TAG) continue
+            if (parser.name == "workbookPr") return parser.getAttributeValue(null, "date1904").let { it == "1" || it == "true" }
+            if (parser.name == "sheets") return false
+        }
+        return false
+    }
+
     // --- Sheet ---
 
     private fun parseSheet(
@@ -363,6 +378,7 @@ object XlsxParser {
         bytes: ByteArray,
         sharedStrings: List<String>,
         styles: List<XlsxCellStyle>,
+        date1904: Boolean,
     ): XlsxSheet {
         val parser = createParser(bytes)
         val rows = mutableListOf<XlsxRow>()
@@ -467,36 +483,19 @@ object XlsxParser {
                                 "inlineStr" -> CellType.INLINE_STRING
                                 "b" -> CellType.BOOLEAN
                                 "e" -> CellType.ERROR
-                                "n", "" -> {
-                                    // Check if number format suggests a date
-                                    val style = styles.getOrNull(currentCellStyle)
-                                    if (style != null && isDateFormat(style.numberFormatId, style.numberFormatCode)) {
-                                        CellType.DATE
-                                    } else {
-                                        CellType.NUMBER
-                                    }
-                                }
+                                "n", "" -> CellType.NUMBER
                                 else -> CellType.STRING
                             }
-                            val displayValue = if (type == CellType.NUMBER) {
-                                formatNumber(resolvedValue)
-                            } else if (type == CellType.DATE) {
-                                formatDate(resolvedValue)
-                            } else {
-                                resolvedValue
-                            }
-                            currentCells.add(
-                                XlsxCell(
-                                    columnIndex = colIndex,
-                                    value = displayValue,
-                                    type = type,
-                                    styleIndex = currentCellStyle,
-                                    formula = currentFormula.toString().ifEmpty { null },
-                                    rawValue = rawValue.takeIf {
-                                        type == CellType.NUMBER || type == CellType.DATE
-                                    },
-                                )
+                            val cell = XlsxCell(
+                                columnIndex = colIndex,
+                                value = resolvedValue,
+                                type = type,
+                                styleIndex = currentCellStyle,
+                                formula = currentFormula.toString().ifEmpty { null },
                             )
+                            currentCells.add(if (type == CellType.NUMBER) {
+                                cell.withNumber(rawValue, styles.getOrNull(currentCellStyle), date1904)
+                            } else cell)
                             inCell = false
                         }
                         "row" -> if (inRow) {
@@ -551,44 +550,6 @@ object XlsxParser {
         }
         val row = ref.substring(i).toIntOrNull() ?: return null
         return (col - 1) to (row - 1)
-    }
-
-    /** Check if a number format ID represents a date. */
-    private fun isDateFormat(numFmtId: Int, customCode: String?): Boolean {
-        // Built-in date format IDs
-        if (numFmtId in 14..22 || numFmtId in 45..47) return true
-        // Check custom format code for date patterns
-        if (customCode != null) {
-            val lower = customCode.lowercase()
-            return lower.contains("yy") || lower.contains("mm") && lower.contains("dd")
-        }
-        return false
-    }
-
-    /** Format a numeric string (remove unnecessary decimals). */
-    private fun formatNumber(value: String): String {
-        val num = value.toDoubleOrNull() ?: return value
-        return if (num == num.toLong().toDouble()) {
-            num.toLong().toString()
-        } else {
-            // Keep reasonable precision
-            val formatted = "%.10g".format(num)
-            formatted.trimEnd('0').trimEnd('.')
-        }
-    }
-
-    /** Convert Excel serial date number to a readable date string. */
-    private fun formatDate(value: String): String {
-        val serial = value.toDoubleOrNull() ?: return value
-        if (serial < 1) return value
-        // Excel epoch is 1900-01-01, with the Lotus 1-2-3 leap year bug
-        val days = serial.toLong() - (if (serial >= 61) 2 else 1)
-        return try {
-            val epoch = java.time.LocalDate.of(1900, 1, 1).plusDays(days)
-            epoch.toString()
-        } catch (_: Exception) {
-            value
-        }
     }
 
     private fun createParser(bytes: ByteArray): XmlPullParser = createXmlParser(bytes)

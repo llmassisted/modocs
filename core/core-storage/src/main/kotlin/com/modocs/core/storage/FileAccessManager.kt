@@ -3,6 +3,7 @@ package com.modocs.core.storage
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.modocs.core.common.DocumentType
 import com.modocs.core.common.MAX_FILE_SIZE_BYTES
 import com.modocs.core.common.getFileSize
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -53,11 +54,9 @@ class FileAccessManager @Inject constructor(
     }
 
     companion object {
-        val SUPPORTED_MIME_TYPES = arrayOf(
-            "application/pdf",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        )
+        val SUPPORTED_MIME_TYPES = DocumentType.entries
+            .filter { it != DocumentType.UNKNOWN }
+            .flatMap { listOf(it.mimeType) + it.alternateMimeTypes }
+            .toTypedArray()
     }
 }

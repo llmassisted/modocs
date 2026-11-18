@@ -15,6 +15,7 @@ data class XlsxDocument(
     val modifiedSheets: MutableSet<Int> = mutableSetOf(),
     val editedCells: Map<Int, Set<Pair<Int, Int>>> = emptyMap(),
     val warnings: List<String> = emptyList(),
+    val date1904: Boolean = false,
 )
 
 data class XlsxSheet(
@@ -62,6 +63,28 @@ data class XlsxCell(
 
 enum class CellType {
     STRING, NUMBER, BOOLEAN, DATE, ERROR, INLINE_STRING
+}
+
+/** What the editor starts from: the stored number behind a formatted number or date, else the shown text. */
+val XlsxCell.editableText: String
+    get() = if (type == CellType.NUMBER || type == CellType.DATE) rawValue ?: value else value
+
+/** Apply the same numeric presentation when opening a sheet and when committing an edit. */
+internal fun XlsxCell.withNumber(raw: String, style: XlsxCellStyle?, date1904: Boolean): XlsxCell {
+    val id = style?.numberFormatId ?: 0
+    val code = style?.numberFormatCode
+    return copy(
+        rawValue = raw,
+        type = if (CellNumberFormat.isDateFormat(id, code)) CellType.DATE else CellType.NUMBER,
+        value = CellNumberFormat.format(raw, id, code, date1904),
+    )
+}
+
+private val ZeroPaddedNumber = Regex("[+-]?0[0-9]+.*")
+
+/** Type for plain text entered by the user or read from CSV; zero-padded codes such as ZIPs stay text. */
+internal fun inferCellType(value: String): CellType {
+    return if (value.toDoubleOrNull()?.isFinite() == true && !ZeroPaddedNumber.matches(value)) CellType.NUMBER else CellType.STRING
 }
 
 data class XlsxCellStyle(

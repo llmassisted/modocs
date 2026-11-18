@@ -55,9 +55,9 @@ object XlsxWriter {
                 }
                 node.elements().filter { it.namespaceURI == NS && it.localName in listOf("f", "v", "is") }
                     .forEach { node.removeChild(it) }
-                if (cell.type == CellType.NUMBER) {
+                if (cell.type == CellType.NUMBER || cell.type == CellType.DATE) {
                     node.removeAttribute("t")
-                    node.appendChild(xml.createElementNS(NS, "v").also { it.textContent = cell.value })
+                    node.appendChild(xml.createElementNS(NS, "v").also { it.textContent = cell.editableText })
                 } else {
                     node.setAttribute("t", "inlineStr")
                     node.appendChild(xml.createElementNS(NS, "is").also { inline ->

@@ -45,6 +45,8 @@ data class XlsxViewerState(
      * strip the user's password protection.
      */
     val wasPasswordProtected: Boolean = false,
+    /** CSV opens read-only: edits could only be saved by rewriting the file as XLSX. */
+    val isReadOnly: Boolean = false,
 )
 
 data class XlsxSearchState(
@@ -104,7 +106,7 @@ class XlsxViewerViewModel @Inject constructor(
     }
 
 
-    fun loadXlsx(uri: Uri, displayName: String?) {
+    fun loadXlsx(uri: Uri, displayName: String?, isCsv: Boolean = false) {
         if (_state.value.document != null) return
 
         documentUri = uri
@@ -117,7 +119,7 @@ class XlsxViewerViewModel @Inject constructor(
 
             try {
                 // Check if file is password-protected (OLE2 container)
-                if (OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
+                if (!isCsv && OoxmlDecryptor.isEncryptedOoxmlFile(context, uri)) {
                     _state.value = _state.value.copy(
                         isLoading = false,
                         isPasswordRequired = true,
@@ -126,11 +128,12 @@ class XlsxViewerViewModel @Inject constructor(
                     return@launch
                 }
 
-                val document = XlsxParser.parse(context, uri)
+                val document = if (isCsv) CsvParser.parse(context, uri) else XlsxParser.parse(context, uri)
                 _state.value = _state.value.copy(
                     isLoading = false,
                     fileName = name,
                     document = document,
+                    isReadOnly = isCsv,
                 )
             } catch (e: CancellationException) {
                 throw e
@@ -296,7 +299,7 @@ class XlsxViewerViewModel @Inject constructor(
     // --- Editing ---
 
     fun toggleEditMode() {
-        if (_state.value.isSaving) return
+        if (_state.value.isSaving || _state.value.isReadOnly) return
         commitDraft()
         val current = _state.value
         _state.value = current.copy(
@@ -313,7 +316,7 @@ class XlsxViewerViewModel @Inject constructor(
             viewModelScope.launch { _events.emit(XlsxEvent.Error("Formula: ${cell.formula} — cached result ${cell.value}. Formula cells are read-only.")) }
             return
         }
-        _state.value = _state.value.copy(editingCell = rowIndex to colIndex, draftText = cell?.value.orEmpty(), draftDirty = false)
+        _state.value = _state.value.copy(editingCell = rowIndex to colIndex, draftText = cell?.editableText.orEmpty(), draftDirty = false)
     }
 
     fun stopEditingCell() {
@@ -324,7 +327,7 @@ class XlsxViewerViewModel @Inject constructor(
         if (_state.value.isSaving) return
         val state = _state.value
         val cell = state.editingCell ?: return
-        val original = state.document?.sheets?.getOrNull(state.activeSheetIndex)?.cellAt(cell.first, cell.second)?.value.orEmpty()
+        val original = state.document?.sheets?.getOrNull(state.activeSheetIndex)?.cellAt(cell.first, cell.second)?.editableText.orEmpty()
         _state.value = state.copy(draftText = text, draftDirty = text != original)
     }
 
@@ -340,7 +343,7 @@ class XlsxViewerViewModel @Inject constructor(
         val sheetIndex = _state.value.activeSheetIndex
         val sheet = document.sheets.getOrNull(sheetIndex) ?: return
 
-        if (_state.value.isSaving || sheet.cellAt(rowIndex, colIndex)?.value == newValue) return
+        if (_state.value.isSaving || sheet.cellAt(rowIndex, colIndex)?.editableText == newValue) return
         // Shared/array formulas cannot be replaced one cell at a time safely.
         if (sheet.rows.any { row -> row.cells.any { it.formula != null } } && sheet.cellAt(rowIndex, colIndex)?.formula != null) {
             viewModelScope.launch { _events.emit(XlsxEvent.Error("Formula cells are read-only; edit an input cell instead")) }
@@ -351,8 +354,12 @@ class XlsxViewerViewModel @Inject constructor(
         val row = rows.find { it.rowIndex == rowIndex } ?: XlsxRow(rowIndex, mutableListOf()).also { rows.add(it) }
         val old = row.cells.find { it.columnIndex == colIndex }
         row.cells.removeAll { it.columnIndex == colIndex }
-        row.cells.add((old ?: XlsxCell(columnIndex = colIndex, value = "")).copy(value = newValue,
-            type = inferEditedCellType(newValue), formula = null, rawValue = null))
+        val cell = (old ?: XlsxCell(columnIndex = colIndex, value = "")).copy(formula = null)
+        row.cells.add(if (inferCellType(newValue) == CellType.NUMBER) {
+            cell.withNumber(newValue, document.styles.getOrNull(cell.styleIndex), document.date1904)
+        } else {
+            cell.copy(value = newValue, type = CellType.STRING, rawValue = null)
+        })
         row.cells.sortBy { it.columnIndex }
         rows.sortBy { it.rowIndex }
         val sheets = document.sheets.toMutableList()
@@ -429,10 +436,6 @@ class XlsxViewerViewModel @Inject constructor(
                 _events.emit(XlsxEvent.SaveError("Save failed: ${e.message ?: "Unknown error"}"))
             }
         }
-    }
-
-    private fun inferEditedCellType(value: String): CellType {
-        return if (value.toDoubleOrNull()?.isFinite() == true && !Regex("[+-]?0[0-9]+.*").matches(value)) CellType.NUMBER else CellType.STRING
     }
 
     // --- Helpers ---
