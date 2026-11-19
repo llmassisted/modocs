@@ -20,6 +20,7 @@ poi = "5.2.5"
 
 # Testing
 junit = "4.13.2"
+uiautomator = "2.3.0"
 mockk = "1.13.16"
 turbine = "1.2.0"
 compose-ui-test = "1.7.6"
@@ -81,6 +82,7 @@ datastore-preferences = { group = "androidx.datastore", name = "datastore-prefer
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 
 # Testing
+androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }

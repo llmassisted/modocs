@@ -5,9 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer as AndroidPdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.util.LruCache
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -25,15 +24,18 @@ class PdfRendererWrapper private constructor(
     private val renderer: AndroidPdfRenderer,
 ) : AutoCloseable {
 
-    val pageCount: Int get() = renderer.pageCount
+    val pageCount: Int = renderer.pageCount
 
-    private val mutex = Mutex()
+    private val lock = Any()
+    private var closed = false
 
-    // LRU-style cache: pageIndex -> rendered bitmap
-    private val pageCache = LinkedHashMap<CacheKey, Bitmap>(16, 0.75f, true)
-    private val maxCacheSize = 8
+    // LruCache synchronizes lookups independently of native page rendering.
+    private val pageCache = LruCache<CacheKey, Bitmap>(8)
 
     data class CacheKey(val pageIndex: Int, val width: Int)
+
+    internal fun cachedPage(pageIndex: Int, renderWidth: Int): Bitmap? =
+        pageCache.get(CacheKey(pageIndex, renderWidth))
 
     /**
      * Render a page at a given width, maintaining aspect ratio.
@@ -43,12 +45,12 @@ class PdfRendererWrapper private constructor(
         if (pageIndex < 0 || pageIndex >= pageCount) return null
 
         val cacheKey = CacheKey(pageIndex, renderWidth)
-        pageCache[cacheKey]?.let { return it }
+        pageCache.get(cacheKey)?.let { return it }
 
         return withContext(Dispatchers.IO) {
-            mutex.withLock {
-                // Double-check after acquiring lock
-                pageCache[cacheKey]?.let { return@withContext it }
+            synchronized(lock) {
+                if (closed) return@withContext null
+                pageCache.get(cacheKey)?.let { return@withContext it }
 
                 try {
                     // A page left open makes every later openPage() fail, so close it even if rendering throws.
@@ -73,13 +75,7 @@ class PdfRendererWrapper private constructor(
                         bitmap
                     }
 
-                    // Evict oldest if cache full. Not recycled: a page on screen may still be drawing it,
-                    // and the garbage collector frees bitmap memory once nothing does.
-                    if (pageCache.size >= maxCacheSize) {
-                        val oldestKey = pageCache.keys.first()
-                        pageCache.remove(oldestKey)
-                    }
-                    pageCache[cacheKey] = bitmap
+                    pageCache.put(cacheKey, bitmap)
 
                     bitmap
                 } catch (e: Exception) {
@@ -95,7 +91,8 @@ class PdfRendererWrapper private constructor(
     suspend fun getPageDimensions(pageIndex: Int): Pair<Int, Int>? {
         if (pageIndex < 0 || pageIndex >= pageCount) return null
         return withContext(Dispatchers.IO) {
-            mutex.withLock {
+            synchronized(lock) {
+                if (closed) return@withContext null
                 try {
                     renderer.openPage(pageIndex).use { page -> page.width to page.height }
                 } catch (e: Exception) {
@@ -105,9 +102,11 @@ class PdfRendererWrapper private constructor(
         }
     }
 
-    override fun close() {
-        pageCache.values.forEach { it.recycle() }
-        pageCache.clear()
+    override fun close() = synchronized(lock) {
+        if (closed) return@synchronized
+        closed = true
+        // An outgoing page may still be drawing a cached bitmap.
+        pageCache.evictAll()
         try { renderer.close() } catch (_: Exception) {}
         try { fileDescriptor.close() } catch (_: Exception) {}
     }

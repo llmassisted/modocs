@@ -37,7 +37,6 @@ data class DocxViewerState(
     val editingElementIndex: Int = -1,
     val viewMode: DocxViewMode = DocxViewMode.CANVAS,
     val pageCount: Int = 0,
-    val currentPage: Int = 0,
     val formattingVersion: Int = 0,
     val isPasswordRequired: Boolean = false,
     val passwordError: String? = null,
@@ -493,10 +492,6 @@ class DocxViewerViewModel @Inject constructor(
     // --- Page Renderer ---
 
     fun getPageRenderer(): DocxPageRenderer? = pageRenderer
-
-    fun updateCurrentPage(page: Int) {
-        _state.value = _state.value.copy(currentPage = page)
-    }
 
     /**
      * Get search highlight rectangles for a specific page (CANVAS mode).

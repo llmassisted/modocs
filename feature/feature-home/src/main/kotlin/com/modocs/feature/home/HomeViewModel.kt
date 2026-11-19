@@ -15,6 +15,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.stateIn
+import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -57,19 +60,29 @@ class HomeViewModel @Inject constructor(
                 return@launch
             }
 
-            recentFilesRepository.addRecentFile(
-                uri = uri.toString(),
-                displayName = name,
-                documentType = docType,
-                fileSizeBytes = null,
-            )
-
             _events.emit(HomeEvent.OpenDocument(uri, docType, name))
         }
     }
 
     fun onRecentFileClicked(recentFile: RecentFile) {
         val uri = Uri.parse(recentFile.uri)
-        onFileSelected(uri, recentFile.displayName)
+        viewModelScope.launch {
+            val event = withContext(Dispatchers.IO) {
+                try {
+                    if (!fileAccessManager.validateFileSize(uri)) {
+                        HomeEvent.ShowError("File exceeds the ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB size limit")
+                    } else {
+                        fileAccessManager.openInputStream(uri)?.use {
+                            HomeEvent.OpenDocument(uri, recentFile.documentType, recentFile.displayName)
+                        }
+                    }
+                } catch (_: SecurityException) {
+                    null
+                } catch (_: IOException) {
+                    null
+                }
+            }
+            _events.emit(event ?: HomeEvent.ShowError("File unavailable. Use Open File to select it again."))
+        }
     }
 }

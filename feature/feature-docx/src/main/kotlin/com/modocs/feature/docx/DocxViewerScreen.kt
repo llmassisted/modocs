@@ -19,6 +19,7 @@ import androidx.compose.material3.TextButton
 import com.modocs.core.ui.components.ZoomableContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
@@ -75,7 +76,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -98,7 +98,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.modocs.fonts.FontResolver
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 // Highlight colors for search
 private val HighlightYellow = Color(0x66FFEB3B)
@@ -113,8 +112,11 @@ fun DocxViewerScreen(
     onNavigateBack: () -> Unit,
     onExportPdf: ((Uri) -> Unit)? = null,
     viewModel: DocxViewerViewModel = hiltViewModel(),
+    documentSwitch: DocumentSwitch? = null,
+    onOpened: (Uri, String) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    ReportDocumentOpened(state.activeUri ?: uri, state.document != null, state.fileName, onOpened)
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val autoPageBreaks by viewModel.autoPageBreaks.collectAsStateWithLifecycle()
     val formattingAtCursor by viewModel.formattingAtCursor.collectAsStateWithLifecycle()
@@ -124,8 +126,7 @@ fun DocxViewerScreen(
 
     val documentActions = rememberDocumentActions(state.activeUri ?: uri, state.fileName.ifEmpty { "document.docx" },
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document", state.isDirty, state.isSaving, state.saveRevision,
-        viewModel::saveDocumentAs, onNavigateBack)
-
+        viewModel::saveDocumentAs, onNavigateBack, documentSwitch)
 
     // SAF launcher for "Save As PDF"
     val pdfSaveLauncher = rememberLauncherForActivityResult(
@@ -150,15 +151,6 @@ fun DocxViewerScreen(
         )
     }
 
-    // SAF launcher for "Save As"
-    val saveAsLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-    ) { outputUri: Uri? ->
-        if (outputUri != null) {
-            viewModel.saveDocumentAs(outputUri)
-        }
-    }
-
     // Collect events (export/save success/failure)
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
@@ -177,7 +169,8 @@ fun DocxViewerScreen(
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
-    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.viewMode == DocxViewMode.CANVAS && state.pageCount > 0)
+    val pages = rememberReaderPagePosition(listState)
+    com.modocs.core.ui.components.RememberReadingPosition(uri.toString(), listState, !state.isLoading && state.viewMode == DocxViewMode.CANVAS && state.pageCount > 0, pages = pages)
 
     // Scroll to match when current search match changes
     LaunchedEffect(searchState.currentMatch, state.viewMode) {
@@ -204,16 +197,12 @@ fun DocxViewerScreen(
                             style = MaterialTheme.typography.titleMedium,
                         )
                         if (state.document != null) {
-                            val subtitle = if (state.viewMode == DocxViewMode.CANVAS && state.pageCount > 0) {
-                                "Page ${state.currentPage + 1} of ${state.pageCount}"
+                            if (state.viewMode == DocxViewMode.CANVAS && state.pageCount > 0) {
+                                ReaderPageNumber(pages, state.pageCount)
                             } else {
-                                "${state.document!!.body.size} elements"
+                                Text("${state.document!!.body.size} elements", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text(
-                                text = subtitle,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
                         }
                     }
                 },
@@ -435,12 +424,6 @@ private fun DocxPagesContent(
 ) {
     val renderer = viewModel.getPageRenderer() ?: return
 
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }
-            .distinctUntilChanged()
-            .collect { viewModel.updateCurrentPage(it) }
-    }
-
     ZoomableContainer(
         modifier = modifier.fillMaxSize(),
         maxScale = 4f,
@@ -550,8 +533,8 @@ private fun DocxPage(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(400.dp)
                 .padding(horizontal = 8.dp)
+                .aspectRatio(renderer.pageAspectRatio)
                 .background(Color.White),
             contentAlignment = Alignment.Center,
         ) {

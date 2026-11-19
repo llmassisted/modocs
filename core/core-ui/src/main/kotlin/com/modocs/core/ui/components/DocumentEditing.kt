@@ -17,17 +17,29 @@ import androidx.compose.ui.unit.dp
 import com.modocs.core.common.buildShareIntent
 import kotlinx.coroutines.launch
 
-class DocumentActions(val saveCopy: () -> Unit, val share: () -> Unit, val back: () -> Unit)
+class DocumentSwitch(val token: Int, val open: () -> Unit, val cancel: () -> Unit)
+
+@Composable
+fun ReportDocumentOpened(uri: Uri, loaded: Boolean, name: String, onOpened: (Uri, String) -> Unit) {
+    var lastReported by rememberSaveable { mutableStateOf<Uri?>(null) }
+    if (loaded && uri != lastReported) SideEffect {
+        onOpened(uri, name)
+        lastReported = uri
+    }
+}
+
+class DocumentActions(val saveCopy: () -> Unit, val saveAs: (String) -> Unit, val share: () -> Unit, val back: () -> Unit)
 
 /** A copy becomes the active document only after saving succeeds. */
 @Composable
 fun rememberDocumentActions(
     uri: Uri, name: String, mimeType: String, dirty: Boolean, saving: Boolean,
-    saveRevision: Int, onSave: (Uri) -> Unit, onBack: () -> Unit,
+    saveRevision: Int, onSave: (Uri) -> Unit, onBack: () -> Unit, documentSwitch: DocumentSwitch? = null,
 ): DocumentActions {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pending by rememberSaveable { mutableStateOf("") }
+    var pickerOpen by rememberSaveable { mutableStateOf(false) }
     var askLeave by remember { mutableStateOf(false) }
     var askShare by remember { mutableStateOf(false) }
     var seenRevision by rememberSaveable { mutableIntStateOf(saveRevision) }
@@ -40,17 +52,25 @@ fun rememberDocumentActions(
         }
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(mimeType)) { output ->
-        if (output != null) onSave(output) else pending = ""
+        pickerOpen = false
+        if (output != null) {
+            if (pending == "switch") pending = ""
+            onSave(output)
+        } else {
+            if (pending == "switch") documentSwitch?.cancel?.invoke()
+            pending = ""
+        }
     }
-    fun save(action: String) {
-        if (!saving) {
+    fun save(action: String, suggestedName: String? = null) {
+        if (!saving && !pickerOpen) {
+            pickerOpen = true
             pending = action
             val extension = when {
                 mimeType.contains("wordprocessingml") -> "docx"
                 mimeType.contains("spreadsheetml") -> "xlsx"
                 else -> "pdf"
             }
-            launcher.launch(name.substringBeforeLast('.', name) + "_copy." + extension)
+            launcher.launch(suggestedName ?: name.substringBeforeLast('.', name) + "_copy." + extension)
         }
     }
     LaunchedEffect(saveRevision, saving) {
@@ -67,15 +87,31 @@ fun rememberDocumentActions(
     }
     val back: () -> Unit = { if (!saving) { if (dirty) askLeave = true else onBack() } }
     BackHandler(enabled = dirty || saving, onBack = back)
-    if (askLeave) AlertDialog(
-        onDismissRequest = { askLeave = false }, title = { Text("Save your changes?") },
-        text = { Text("Save a copy to keep your changes and preserve the original.") },
-        confirmButton = { TextButton(onClick = { askLeave = false; save("back") }) { Text("Save and close") } },
-        dismissButton = { Row {
-            TextButton(onClick = { askLeave = false }) { Text("Keep editing") }
-            TextButton(onClick = { askLeave = false; onBack() }) { Text("Discard") }
-        } },
-    )
+    LaunchedEffect(documentSwitch?.token, dirty, saving, pending, pickerOpen) {
+        if (documentSwitch != null && !dirty && !saving && !pickerOpen && pending.isEmpty()) documentSwitch.open()
+    }
+    val switching = documentSwitch != null && dirty && !saving && !pickerOpen && pending.isEmpty()
+    if (switching || askLeave) {
+        val keepEditing = {
+            askLeave = false
+            documentSwitch?.cancel?.invoke()
+            Unit
+        }
+        AlertDialog(
+            onDismissRequest = keepEditing, title = { Text("Save your changes?") },
+            text = { Text("Save a copy to keep your changes and preserve the original.") },
+            confirmButton = { TextButton(onClick = { askLeave = false; save(if (switching) "switch" else "back") }) {
+                Text(if (switching) "Save and open" else "Save and close")
+            } },
+            dismissButton = { Row {
+                TextButton(onClick = keepEditing) { Text("Keep editing") }
+                TextButton(onClick = {
+                    askLeave = false
+                    if (switching) documentSwitch?.open?.invoke() else onBack()
+                }) { Text("Discard") }
+            } },
+        )
+    }
     if (askShare) AlertDialog(
         onDismissRequest = { askShare = false }, title = { Text("Share your changes") },
         text = { Text("Save an edited copy, then choose where to send it.") },
@@ -84,6 +120,7 @@ fun rememberDocumentActions(
     )
     return DocumentActions(
         saveCopy = { save("") },
+        saveAs = { suggested -> save("", suggested) },
         share = { if (!saving) { if (dirty) askShare = true else share() } },
         back = back,
     )

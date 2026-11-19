@@ -1,6 +1,7 @@
 package com.modocs.app
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -15,10 +16,20 @@ import com.modocs.core.common.getFileSize
 import com.modocs.core.ui.theme.MoDocsTheme
 import com.modocs.app.navigation.DocumentRequest
 import com.modocs.app.navigation.MoDocsApp
+import androidx.lifecycle.lifecycleScope
+import com.modocs.core.common.AppPreferences
+import com.modocs.core.storage.FileAccessManager
+import com.modocs.core.storage.RecentFilesRepository
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var recentFiles: RecentFilesRepository
+    @Inject lateinit var fileAccess: FileAccessManager
 
     // A one-shot request to open an externally-supplied document. Each incoming
     // intent produces a request with a fresh [DocumentRequest.token] so navigation
@@ -30,21 +41,44 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        handleIntent(intent)
+        val pendingUri = savedInstanceState?.getString("pendingUri")
+        val pendingType = savedInstanceState?.getString("pendingType")
+        if (pendingUri != null && pendingType != null) {
+            documentRequest = DocumentRequest(Uri.parse(pendingUri), DocumentType.valueOf(pendingType), ++requestCounter)
+        } else if (savedInstanceState == null) {
+            handleIntent(intent)
+        }
 
         setContent {
             val prefs = com.modocs.core.ui.components.rememberAppPreferences()
             val dark = when (prefs.theme) { "Dark" -> true; "Light" -> false; else -> androidx.compose.foundation.isSystemInDarkTheme() }
             MoDocsTheme(darkTheme = dark, dynamicColor = prefs.dynamicColor) {
-                MoDocsApp(documentRequest = documentRequest)
+                MoDocsApp(documentRequest, onConsumed = { request ->
+                    if (documentRequest == request) documentRequest = null
+                }, onOpened = { uri, name, type ->
+                    if (AppPreferences.get(this).state.value.keepRecents) {
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            if (fileAccess.persistPermission(uri)) {
+                                recentFiles.addRecentFile(uri.toString(), name, type, null)
+                            }
+                        }
+                    }
+                })
             }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        documentRequest?.let {
+            outState.putString("pendingUri", it.uri.toString())
+            outState.putString("pendingType", it.type.name)
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Keep getIntent() current so a later activity recreation restores the
-        // most recently opened document, not the one this activity launched with.
+        // The navigation stack restores accepted opens; only pending requests need replay.
         setIntent(intent)
         handleIntent(intent)
     }
@@ -57,7 +91,12 @@ class MainActivity : ComponentActivity() {
 
         // Reject oversized files up front (external opens otherwise bypass the
         // picker's size check). Size is best-effort; allow through if unknown.
-        val size = uri.getFileSize(this)
+        val size = try {
+            uri.getFileSize(this)
+        } catch (_: SecurityException) {
+            Toast.makeText(this, "File unavailable. Open it again from the app that shared it.", Toast.LENGTH_LONG).show()
+            return
+        }
         if (size != null && size > MAX_FILE_SIZE_BYTES) {
             val maxMb = MAX_FILE_SIZE_BYTES / (1024 * 1024)
             Toast.makeText(this, "File too large (max ${maxMb}MB)", Toast.LENGTH_LONG).show()
@@ -71,6 +110,10 @@ class MainActivity : ComponentActivity() {
             .takeIf { it != DocumentType.UNKNOWN }
             ?: DocumentType.fromFileName(fileName)
 
+        if (type == DocumentType.UNKNOWN) {
+            Toast.makeText(this, "Unsupported file type", Toast.LENGTH_LONG).show()
+            return
+        }
         documentRequest = DocumentRequest(uri = uri, type = type, token = ++requestCounter)
     }
 }
